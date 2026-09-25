@@ -5,6 +5,10 @@ import re
 from collections import defaultdict, Counter
 import random
 
+# Resolve paths relative to the repo root (script lives in EDA/)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
 def safe_print(obj):
     if hasattr(obj, 'to_dict'):
         print(json.dumps(obj.to_dict(), ensure_ascii=False, indent=2))
@@ -13,7 +17,41 @@ def safe_print(obj):
     else:
         print(obj)
 
-train_dir = "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train"
+def soundex(token):
+    """Standard Soundex implementation."""
+    token = token.upper()
+    if not token:
+        return "0000"
+    first = token[0]
+    mapping = {
+        'B': '1', 'F': '1', 'P': '1', 'V': '1',
+        'C': '2', 'G': '2', 'J': '2', 'K': '2', 'Q': '2', 'S': '2', 'X': '2', 'Z': '2',
+        'D': '3', 'T': '3',
+        'L': '4',
+        'M': '5', 'N': '5',
+        'R': '6'
+    }
+    code = first
+    prev = mapping.get(first, '0')
+    for c in token[1:]:
+        m = mapping.get(c, '0')
+        if m != prev and m != '0':
+            code += m
+            if len(code) == 4:
+                break
+        prev = m
+    return code.ljust(4, '0')
+
+def get_address_tokens(address, max_tokens=10):
+    """Extract address tokens — first 5 + last 5 to capture trailing postcodes."""
+    if not address:
+        return []
+    all_tokens = re.findall(r'\b\w{3,}\b', address.lower())
+    if len(all_tokens) <= max_tokens:
+        return all_tokens
+    return list(dict.fromkeys(all_tokens[:5] + all_tokens[-5:]))
+
+train_dir = os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train")
 
 # Load full datasets
 print("Loading data...")
@@ -33,12 +71,12 @@ gt_parsed = gt_parsed.with_columns([
     pl.when(pl.col('matched_entity_ids') == '').then(0).otherwise(pl.col('num_matches')).alias('num_matches_fixed')
 ])
 
-# Build ground truth mapping: S1_id -> set of matched S2/S3 IDs
+# Build ground truth mapping — defensive against both None and empty string
 print("Building GT map...")
 gt_map = {}
 for row in gt.iter_rows(named=True):
     s1_id = row['source1_entity_id']
-    matches = row['matched_entity_ids'].split(',') if row['matched_entity_ids'] else []
+    matches = row['matched_entity_ids'].split(',') if row['matched_entity_ids'] not in (None, '') else []
     gt_map[s1_id] = set(matches)
 
 print(f"Total S1 entities: {len(gt_map):,}")
@@ -100,13 +138,12 @@ for s1_id in sample_s1_ids:
 print(f"  Recall: {recalled}/{total_matches} = {recalled/total_matches*100:.1f}%")
 print(f"  Avg candidates per S1: {total_cands/len(sample_s1_ids):.0f}")
 
-# Strategy 3: Country + address tokens
+# Strategy 3: Country + address tokens (FIXED: first 5 + last 5)
 print("\n=== BLOCKING STRATEGY 3: COUNTRY + ADDRESS TOKENS ===")
 addr_token_index = defaultdict(set)
 for row in s23_rows:
     if row['business_address']:
-        tokens = re.findall(r'\b\w{3,}\b', row['business_address'].lower())
-        for token in tokens[:5]:
+        for token in get_address_tokens(row['business_address']):
             key = (row['country'], token)
             addr_token_index[key].add(row['entity_id'])
 
@@ -118,8 +155,7 @@ for s1_id in sample_s1_ids:
     country = s1_row['country']
     candidates = set()
     if s1_row['business_address']:
-        tokens = re.findall(r'\b\w{3,}\b', s1_row['business_address'].lower())
-        for token in tokens[:5]:
+        for token in get_address_tokens(s1_row['business_address']):
             candidates |= addr_token_index.get((country, token), set())
     total_cands += len(candidates)
     true_matches = gt_map[s1_id]
@@ -129,32 +165,8 @@ for s1_id in sample_s1_ids:
 print(f"  Recall: {recalled}/{total_matches} = {recalled/total_matches*100:.1f}%")
 print(f"  Avg candidates per S1: {total_cands/len(sample_s1_ids):.0f}")
 
-# Strategy 4: Phonetic (Soundex on first name token)
+# Strategy 4: Phonetic (using shared soundex)
 print("\n=== BLOCKING STRATEGY 4: PHONETIC (SOUNDEX) ON NAME ===")
-def soundex(token):
-    token = token.upper()
-    if not token:
-        return "0000"
-    first = token[0]
-    mapping = {
-        'B': '1', 'F': '1', 'P': '1', 'V': '1',
-        'C': '2', 'G': '2', 'J': '2', 'K': '2', 'Q': '2', 'S': '2', 'X': '2', 'Z': '2',
-        'D': '3', 'T': '3',
-        'L': '4',
-        'M': '5', 'N': '5',
-        'R': '6'
-    }
-    code = first
-    prev = mapping.get(first, '0')
-    for c in token[1:]:
-        m = mapping.get(c, '0')
-        if m != prev and m != '0':
-            code += m
-            if len(code) == 4:
-                break
-        prev = m
-    return code.ljust(4, '0')
-
 phonetic_index = defaultdict(set)
 for row in s23_rows:
     if row['business_name']:
@@ -196,8 +208,7 @@ for s1_id in sample_s1_ids:
     candidates |= name_prefix_index.get((country, prefix), set())
     
     if s1_row['business_address']:
-        tokens = re.findall(r'\b\w{3,}\b', s1_row['business_address'].lower())
-        for token in tokens[:5]:
+        for token in get_address_tokens(s1_row['business_address']):
             candidates |= addr_token_index.get((country, token), set())
     
     if s1_row['business_name']:

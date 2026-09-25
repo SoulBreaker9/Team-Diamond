@@ -1,3 +1,11 @@
+# ======================================================================
+# NOTE: This script is a DOCUMENTATION GENERATOR, not a data analysis script.
+# It prints a formatted summary of EDA findings and pipeline architecture.
+# No data is loaded or analyzed here — all numbers come from the other
+# EDA scripts (eda_analysis.py, eda_quality_analysis.py, etc.).
+# For the rendered output, see: eda.md in the repo root.
+# ======================================================================
+
 # EDA SUMMARY & FEATURE ENGINEERING PRIORITIES
 # Based on completed analysis of 2.2M S1, 5M S2, 5.3M S3, 2.2M GT records
 

@@ -3,6 +3,11 @@ import os
 import json
 import re
 from collections import defaultdict
+import random
+
+# Resolve paths relative to the repo root (script lives in EDA/)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
 def safe_print(obj):
     if hasattr(obj, 'to_dict'):
@@ -12,7 +17,41 @@ def safe_print(obj):
     else:
         print(obj)
 
-train_dir = "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train"
+def soundex(token):
+    """Standard Soundex implementation."""
+    token = token.upper()
+    if not token:
+        return "0000"
+    first = token[0]
+    mapping = {
+        'B': '1', 'F': '1', 'P': '1', 'V': '1',
+        'C': '2', 'G': '2', 'J': '2', 'K': '2', 'Q': '2', 'S': '2', 'X': '2', 'Z': '2',
+        'D': '3', 'T': '3',
+        'L': '4',
+        'M': '5', 'N': '5',
+        'R': '6'
+    }
+    code = first
+    prev = mapping.get(first, '0')
+    for c in token[1:]:
+        m = mapping.get(c, '0')
+        if m != prev and m != '0':
+            code += m
+            if len(code) == 4:
+                break
+        prev = m
+    return code.ljust(4, '0')
+
+def get_address_tokens(address, max_tokens=10):
+    """Extract address tokens — first 5 + last 5 to capture trailing postcodes."""
+    if not address:
+        return []
+    all_tokens = re.findall(r'\b\w{3,}\b', address.lower())
+    if len(all_tokens) <= max_tokens:
+        return all_tokens
+    return list(dict.fromkeys(all_tokens[:5] + all_tokens[-5:]))
+
+train_dir = os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train")
 
 # Load full datasets
 print("Loading data...")
@@ -32,23 +71,25 @@ gt_parsed = gt_parsed.with_columns([
     pl.when(pl.col('matched_entity_ids') == '').then(0).otherwise(pl.col('num_matches')).alias('num_matches_fixed')
 ])
 
-# Build ground truth mapping: S1_id -> set of matched S2/S3 IDs
+# Build ground truth mapping — defensive against both None and empty string
 gt_map = {}
 for row in gt.iter_rows(named=True):
     s1_id = row['source1_entity_id']
-    matches = row['matched_entity_ids'].split(',') if row['matched_entity_ids'] else []
+    matches = row['matched_entity_ids'].split(',') if row['matched_entity_ids'] not in (None, '') else []
     gt_map[s1_id] = set(matches)
 
 print(f"Total S1 entities: {len(gt_map):,}")
 print(f"Total S2+S3 entities: {s23.shape[0]:,}")
 
 # Sample for blocking analysis (use 50k S1 entities for speed)
-import random
 random.seed(42)
 sample_s1_ids = random.sample(list(gt_map.keys()), min(50000, len(gt_map)))
 s1_sample = s1.filter(pl.col('entity_id').is_in(sample_s1_ids))
 
 print(f"\nSample S1 entities: {s1_sample.shape[0]:,}")
+
+# FIXED: Pre-build a dict for O(1) lookup instead of O(N) filter per entity
+s1_dict = {row['entity_id']: row for row in s1_sample.iter_rows(named=True)}
 
 # Build S2+S3 lookup by country for country-aware blocking
 s23_by_country = {}
@@ -63,7 +104,7 @@ print("\n=== BLOCKING STRATEGY 1: COUNTRY ONLY ===")
 recalled = 0
 total_matches = 0
 for s1_id in sample_s1_ids:
-    s1_row = s1.filter(pl.col('entity_id') == s1_id).row(0, named=True)
+    s1_row = s1_dict[s1_id]  # O(1) dict lookup instead of O(N) DataFrame filter
     country = s1_row['country']
     candidates = set(s23_by_country.get(country, []))
     true_matches = gt_map[s1_id]
@@ -71,7 +112,7 @@ for s1_id in sample_s1_ids:
     if true_matches & candidates:
         recalled += len(true_matches & candidates)
 print(f"  Recall: {recalled}/{total_matches} = {recalled/total_matches*100:.1f}%")
-print(f"  Avg candidates per S1: {sum(len(s23_by_country.get(s1.filter(pl.col('entity_id')==sid).row(0,named=True)['country'], [])) for sid in sample_s1_ids) / len(sample_s1_ids):.0f}")
+print(f"  Avg candidates per S1: {sum(len(s23_by_country.get(s1_dict[sid]['country'], [])) for sid in sample_s1_ids) / len(sample_s1_ids):.0f}")
 
 # Strategy 2: Country + first 3 chars of business_name
 print("\n=== BLOCKING STRATEGY 2: COUNTRY + NAME PREFIX (3 chars) ===")
@@ -127,33 +168,8 @@ for s1_id in sample_s1_ids:
 print(f"  Recall: {recalled}/{total_matches} = {recalled/total_matches*100:.1f}%")
 print(f"  Avg candidates per S1: {total_cands/len(sample_s1_ids):.0f}")
 
-# Strategy 4: Phonetic blocking (Soundex on first name token)
+# Strategy 4: Phonetic blocking (using shared Soundex)
 print("\n=== BLOCKING STRATEGY 4: PHONETIC (SOUNDEX) ON NAME ===")
-def soundex(token):
-    """Simple Soundex implementation"""
-    token = token.upper()
-    if not token:
-        return "0000"
-    first = token[0]
-    mapping = {
-        'B': '1', 'F': '1', 'P': '1', 'V': '1',
-        'C': '2', 'G': '2', 'J': '2', 'K': '2', 'Q': '2', 'S': '2', 'X': '2', 'Z': '2',
-        'D': '3', 'T': '3',
-        'L': '4',
-        'M': '5', 'N': '5',
-        'R': '6'
-    }
-    code = first
-    prev = mapping.get(first, '0')
-    for c in token[1:]:
-        m = mapping.get(c, '0')
-        if m != prev and m != '0':
-            code += m
-            if len(code) == 4:
-                break
-        prev = m
-    return code.ljust(4, '0')
-
 phonetic_index = defaultdict(set)
 for row in s23.iter_rows(named=True):
     if row['business_name']:

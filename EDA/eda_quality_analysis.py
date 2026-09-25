@@ -2,6 +2,10 @@ import polars as pl
 import os
 import json
 
+# Resolve paths relative to the repo root (script lives in EDA/)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
 def safe_print(obj):
     if hasattr(obj, 'to_dict'):
         print(json.dumps(obj.to_dict(), ensure_ascii=False, indent=2))
@@ -10,7 +14,7 @@ def safe_print(obj):
     else:
         print(obj)
 
-train_dir = "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train"
+train_dir = os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train")
 s1 = pl.read_csv(os.path.join(train_dir, "train_source1.tsv"), separator="\t")
 s2 = pl.read_csv(os.path.join(train_dir, "train_source2.tsv"), separator="\t")
 s3 = pl.read_csv(os.path.join(train_dir, "train_source3.tsv"), separator="\t")
@@ -64,7 +68,7 @@ missing_s2 = 0
 missing_s3 = 0
 total_matched = 0
 for row in gt_sample.iter_rows(named=True):
-    matches = row['matched_entity_ids'].split(',') if row['matched_entity_ids'] else []
+    matches = row['matched_entity_ids'].split(',') if row['matched_entity_ids'] not in (None, '') else []
     total_matched += len(matches)
     for mid in matches:
         if mid.startswith('S2-') and mid not in s2_ids:
@@ -120,7 +124,6 @@ print(f"  S3 matches: {s3_match_count:,} ({s3_match_count/total_matched*100:.1f}
 
 # 8. Memory footprint estimation
 print("\n8. MEMORY ESTIMATION")
-import sys
 for name, df in [("S1", s1), ("S2", s2), ("S3", s3)]:
     mem_mb = df.estimated_size() / (1024**2)
     print(f"  {name}: ~{mem_mb:.0f} MB in memory")

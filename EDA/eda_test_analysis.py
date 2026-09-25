@@ -2,6 +2,10 @@ import polars as pl
 import os
 import json
 
+# Resolve paths relative to the repo root (script lives in EDA/)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
 def safe_print(obj):
     if hasattr(obj, 'to_dict'):
         print(json.dumps(obj.to_dict(), ensure_ascii=False, indent=2))
@@ -10,7 +14,7 @@ def safe_print(obj):
     else:
         print(obj)
 
-test_dir = "data/6ab10eb3b23ba_student_resource/student_resource/dataset/test"
+test_dir = os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset/test")
 
 print("=== TEST DATA ANALYSIS ===")
 s1_test = pl.read_csv(os.path.join(test_dir, "test_source1.tsv"), separator="\t", n_rows=100000)
@@ -39,8 +43,17 @@ for name, df in [("S1_test", s1_test), ("S2_test", s2_test), ("S3_test", s3_test
 
 print("\n=== TEST ADDRESS LENGTH STATS ===")
 for name, df in [("S1_test", s1_test), ("S2_test", s2_test), ("S3_test", s3_test)]:
-    lengths = df['business_address'].str.len_chars()
-    stats = {"mean": float(lengths.mean()), "median": float(lengths.median()), "min": int(lengths.min()), "max": int(lengths.max())}
+    # Filter out null addresses before computing length stats (S2/S3 test have ~2.7% nulls)
+    non_null_df = df.filter(pl.col('business_address').is_not_null())
+    lengths = non_null_df['business_address'].str.len_chars()
+    null_count = df.shape[0] - non_null_df.shape[0]
+    stats = {
+        "mean": float(lengths.mean()) if lengths.len() > 0 else 0.0,
+        "median": float(lengths.median()) if lengths.len() > 0 else 0.0,
+        "min": int(lengths.min()) if lengths.len() > 0 else 0,
+        "max": int(lengths.max()) if lengths.len() > 0 else 0,
+        "null_addresses": null_count
+    }
     safe_print({name: stats})
 
 # France-specific analysis
@@ -57,7 +70,7 @@ for name, df in [("S1_test", s1_test), ("S2_test", s2_test), ("S3_test", s3_test
 
 # Compare train vs test distributions
 print("\n=== TRAIN vs TEST DISTRIBUTION COMPARISON ===")
-train_dir = "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train"
+train_dir = os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train")
 s1_train = pl.read_csv(os.path.join(train_dir, "train_source1.tsv"), separator="\t", n_rows=100000)
 s2_train = pl.read_csv(os.path.join(train_dir, "train_source2.tsv"), separator="\t", n_rows=100000)
 s3_train = pl.read_csv(os.path.join(train_dir, "train_source3.tsv"), separator="\t", n_rows=100000)

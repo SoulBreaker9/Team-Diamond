@@ -4,6 +4,10 @@ import json
 import re
 from collections import Counter
 
+# Resolve paths relative to the repo root (script lives in EDA/)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
 def safe_print(obj):
     if hasattr(obj, 'to_dict'):
         print(json.dumps(obj.to_dict(), ensure_ascii=False, indent=2))
@@ -12,7 +16,7 @@ def safe_print(obj):
     else:
         print(obj)
 
-train_dir = "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train"
+train_dir = os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train")
 s1 = pl.read_csv(os.path.join(train_dir, "train_source1.tsv"), separator="\t", n_rows=200000)
 s2 = pl.read_csv(os.path.join(train_dir, "train_source2.tsv"), separator="\t", n_rows=200000)
 s3 = pl.read_csv(os.path.join(train_dir, "train_source3.tsv"), separator="\t", n_rows=200000)
