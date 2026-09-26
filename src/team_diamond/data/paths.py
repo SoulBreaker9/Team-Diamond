@@ -125,11 +125,9 @@ def _local_join(root: str, *parts: str) -> str:
 
 
 def _s3_keys(prefix: str) -> set[str]:
-    """List every object key under an S3 prefix, one level deep.
+    """List every object key under an S3 prefix, recursively.
 
-    A single ``list_objects_v2`` call is capped at 1000 keys, which is enough
-    here because the challenge dataset is 7 files plus a handful of siblings.
-    Pagination is implemented anyway so a larger prefix cannot silently produce
+    Pagination is implemented so a larger prefix cannot silently produce
     a partial view and a false "not found".
     """
     location = parse_s3_path(prefix)
@@ -140,13 +138,10 @@ def _s3_keys(prefix: str) -> set[str]:
         kwargs: dict[str, object] = {
             "Bucket": location.bucket,
             "Prefix": f"{location.key}/" if location.key else "",
-            "Delimiter": "/",
         }
         if token:
             kwargs["ContinuationToken"] = token
         response = client.list_objects_v2(**kwargs)  # type: ignore[arg-type]
-        for common in response.get("CommonPrefixes", ()):
-            keys.add(str(common["Prefix"]).rstrip("/"))
         for item in response.get("Contents", ()):
             keys.add(str(item["Key"]))
         if not response.get("IsTruncated"):
@@ -177,10 +172,21 @@ def verify_layout(root: str) -> str | None:
                 f"Check the bucket name, the prefix, and that this instance's "
                 f"role has s3:ListBucket on it."
             ) from error
+
+        # For S3, `available` contains keys relative to the bucket (e.g., "prefix/train/file.tsv").
+        # Extract the relative prefix from the root for comparison.
+        parsed = parse_s3_path(root)
+        root_relative = parsed.key.rstrip("/") if parsed.key else ""
+        if root_relative:
+            root_relative += "/"
+
         for sub in _SUBPATH_CANDIDATES:
-            prefix = _join(root, sub) if sub else root.rstrip("/")
+            if sub:
+                probe_relative = f"{root_relative}{sub.strip('/')}/"
+            else:
+                probe_relative = root_relative
             wanted = {
-                _join(prefix, split, name)
+                f"{probe_relative}{split}/{name}"
                 for split, names in SPLIT_FILES.items()
                 for name in names
             }
