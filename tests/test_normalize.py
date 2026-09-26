@@ -188,9 +188,36 @@ class TestNoCountryBranching:
         assert out.startswith("cafe mumbai")
         assert any("ऀ" <= ch <= "ॿ" for ch in out), f"Devanagari was lost: {out!r}"
 
-    def test_devanagari_folds_consistently(self) -> None:
-        """Nukta and no-nukta spellings must land on the same token."""
-        assert normalize_name("बिज़नेस") == normalize_name("बिजनेस")
+    def test_devanagari_nukta_is_preserved_not_converged(self) -> None:
+        """Nukta and no-nukta spellings are *not* forced together.
+
+        This test previously asserted they converged. That assertion was
+        describing an accident, not a decision: nukta (U+093C, category Mn) was
+        being shredded along with every other Devanagari mark, and the surviving
+        letters happened to coincide. Once marks are correctly preserved, the
+        nukta is real information and the two spellings stay distinct.
+
+        Which behaviour helps $F_{0.5}$ is **not measured yet**. Folding nuktas
+        would be a Unicode-category rule, not a country branch, so it is
+        permitted by AGENTS.md §8.5 -- but it is an ablation item (see
+        experiments/registry.csv), not a default. Until it is measured, the
+        lossless behaviour stands.
+        """
+        with_nukta = normalize_name("बिज़नेस")
+        without = normalize_name("बिजनेस")
+        assert with_nukta == "बिज़नेस"
+        assert without == "बिजनेस"
+        assert with_nukta != without
+
+    def test_devanagari_matra_is_not_a_separator(self) -> None:
+        """U+093E is category Mc with combining class 0.
+
+        The old code dropped marks via ``unicodedata.combining(ch) != 0``,
+        which silently missed every Mc character (combining class 0), and then
+        split on them with ``[^\\w]`` because Python's ``\\w`` excludes marks.
+        """
+        assert normalize_name("प्राइवेट") == "प्राइवेट"
+        assert len(normalize_name("प्राइवेट").split()) == 1
 
     def test_french_accents_strip_but_letters_survive(self) -> None:
         """The measured test-set case: 40,789 accented French names (2.354%)."""

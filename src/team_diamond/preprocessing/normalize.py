@@ -110,19 +110,141 @@ _ADDRESS_ABBREVIATIONS: dict[str, str] = {
     "fl": "floor", "bldg": "building", "no": "number", "nr": "number",
 }
 
-# Punctuation and separators treated as token boundaries.
+# ---------------------------------------------------------------------------
+# Tokenisation
+# ---------------------------------------------------------------------------
+# Tokenisation is done by TRANSLATION, not by a negated regex character class,
+# and that choice is load-bearing.
 #
-# The negated class is Unicode-aware: `[^\w]` plus an explicit punctuation set.
-# An earlier draft used `[^0-9a-z]+`, which is ASCII-only and DELETED every
-# non-Latin character. Measured impact: train S1 contains 0 non-ASCII names, so
-# that bug was invisible on train — but test S1 contains 40,789 accented French
-# names (2.354%), including "École primaire Sainte Pierre". ASCII-only
-# normalisation would have silently mangled every one of them.
+# Python's `re` defines `\w` as `[a-zA-Z0-9_]` plus Unicode *alphanumerics*,
+# which EXCLUDES combining marks. Rust's regex — which backs Polars — defines
+# `\w` as `[\p{Alphabetic}\p{M}\p{Nd}\p{Pc}\p{Join_Control}]`, which INCLUDES
+# them. The two engines therefore disagree, and the Python side is the one that
+# destroys data.
 #
-# This is exactly the failure mode AGENTS.md §8.5 warns about: the defect is
-# invisible in training and activates only on the test distribution shift.
-_TOKEN_SPLIT = re.compile(r"[^\w]+", re.UNICODE)
+# Concretely, a negated class shreds Devanagari into individual letters:
+#
+#     normalize_name("प्राइवेट")   # was -> 'पर इव ट'
+#
+# because the matras (U+093E, U+093F, ...) are category Mc, are not `\w` in
+# Python, and are not removed by the accent stripper (see `_fold_latin`). The
+# word is destroyed. 5.4% of train S2 and 6.3% of test S2 carry Devanagari, so
+# this silently deletes a large slice of the vendor-side name signal.
+#
+# The fix is to define "word character" the way the fast path does — by Unicode
+# category — and to use one definition on both sides. `_SEPARATOR_TABLE` is that
+# definition: anything not in L*, M*, N*, Pc, or whitespace becomes a space.
+#
+# Kept categories and why:
+#   L*  letters            M*  combining marks (must stay attached to the base)
+#   N*  digits             Pc  connector punctuation, i.e. "_"
+# A mark is never a separator, so an Indic syllable survives as one token.
+def _is_word_char(char: str) -> bool:
+    """True for characters that must never act as a token boundary.
+
+    Defined to match **Rust's** ``\\w``, not Python's, because the fast path runs
+    on Rust and the two must agree exactly. Rust's definition is::
+
+        \\w == [\\p{Alphabetic}\\p{M}\\p{Nd}\\p{Pc}\\p{Join_Control}]
+
+    which expands to the categories below. The subtlety is the numbers: Rust
+    keeps ``Nd`` (decimal digits) but **not** ``No`` or ``Nf``. Python's
+    ``str.isalnum`` keeps all of them, so a naive port keeps ``\\u00bd`` (``1/2``)
+    as a token while the fast path discards it as a separator. That is how
+    "1/2 Price Store" became "1/2 price" on the reference side and "price" on the
+    fast side. The symbol reading is the better one anyway, so the reference is
+    corrected to match Rust.
+
+    Known residual gap, accepted and tested rather than papered over: Rust's
+    ``\\p{Alphabetic}`` also contains ``Other_Alphabetic`` marks, which Python
+    exposes no flag for. Keeping all of ``M*`` is a superset of Rust there, so
+    the reference is marginally more conservative (it glues slightly more
+    together). ``tests/test_normalize_fast.py`` checks agreement on every
+    character actually present in the corpus rather than on theory.
+
+    Args:
+        char: A single character.
+
+    Returns:
+        Whether the character belongs inside a token.
+    """
+    if char.isspace():
+        return True
+    category = unicodedata.category(char)
+    if category in ("Nd", "Pc", "Nl", "Cf"):
+        # Nd decimal digits, Pc connector punctuation ("_"), Nl letter numbers,
+        # Cf format controls (Rust includes Join_Control, U+200C/U+200D).
+        return True
+    return category[0] in ("L", "M")
+
+
+_SEPARATOR_TABLE: dict[int, str] = {
+    code_point: " "
+    for code_point in range(0x0000, 0x10000)
+    if not _is_word_char(chr(code_point))
+}
 _WHITESPACE = re.compile(r"\s+")
+
+
+def _build_latin_fold() -> dict[str, str]:
+    """Letters whose NFKD decomposition is exactly one ASCII letter -> that letter.
+
+    Scanned once at import. Kept as a table rather than a per-character NFKD
+    call because :mod:`team_diamond.preprocessing.normalize_fast` needs the
+    identical table, and two independently derived tables would eventually
+    disagree.
+    """
+    table: dict[str, str] = {}
+    for code_point in range(0x0000, 0x10000):
+        char = chr(code_point)
+        # ASCII letters decompose to themselves. Including them would make the
+        # fast path perform ~50 no-op string passes per column, and would make
+        # `require_fold_coverage` report ASCII characters as "missing folds",
+        # which is noise rather than a real coverage gap.
+        if char.isascii() or not unicodedata.category(char).startswith("L"):
+            continue
+        stripped = "".join(
+            ch
+            for ch in unicodedata.normalize("NFKD", char)
+            if not unicodedata.combining(ch)
+        )
+        if len(stripped) == 1 and stripped.isascii() and stripped.isalpha():
+            table[char] = stripped
+    return table
+
+
+_LATIN_FOLD: dict[str, str] = _build_latin_fold()
+
+
+def _fold_latin(text: str) -> str:
+    """Fold accented **letters** to ASCII. Language-agnostic by construction.
+
+    The rule is a Unicode property, not a per-language list: *if a character is
+    a letter whose canonical decomposition is a single ASCII letter, replace it
+    with that letter.* Everything else is left untouched.
+
+    Leaving everything else alone is the important half. An earlier version used
+    ``NFKD`` + "drop anything with ``unicodedata.combining(ch) != 0``", which is
+    wrong twice over:
+
+    - It is not the same as "drop combining marks". ``unicodedata.combining``
+      returns the canonical combining *class*, which is 0 for many real marks
+      (U+0947 DEVANAGARI VOWEL SIGN E is category Mn but returns 0), so marks
+      slipped through and were then split as separators.
+    - Even a correct mark-strip is destructive outside Latin. Devanagari matras
+      carry the vowel of the syllable; dropping them merges distinct words.
+
+    Consequences of the narrower rule, all intentional:
+
+    - ``Café`` -> ``cafe`` and ``Müller`` -> ``muller`` still work.
+    - ``प्राइवेट`` is preserved exactly, matras included.
+    - ``Œ`` (U+0152, 169 occurrences) has no ASCII decomposition, so it stays
+      ``Œ`` rather than becoming ``oe``. Whether to add an explicit ligature map
+      is an open ablation item, not a silent default.
+    - ``°`` and ``½`` are symbols rather than letters, so they are not folded
+      and instead act as token separators.
+    """
+    return "".join(_LATIN_FOLD.get(char, char) for char in text)
 
 # Sound-alike collapses for the tokens that survive. Deliberately tiny: these
 # are applied as a *feature* signal, not baked into the normalised string, so
@@ -165,17 +287,22 @@ def _strip_accents(text: str) -> str:
 
 
 def _basic_clean(text: str) -> str:
-    """Casefold, strip accents, expand ``&``, collapse punctuation to spaces.
+    """Casefold, fold Latin accents, expand ``&``, tokenise, collapse whitespace.
 
     ``&`` becomes the word ``and`` rather than being deleted, so that
     "Muller & Sohne" and "Muller and Sohne" agree without a language-specific
     rule. Deleting it outright would fuse the two surrounding tokens.
+
+    Tokenisation translates every non-word character to a space (see
+    ``_SEPARATOR_TABLE``) rather than applying a negated regex class, because
+    Python and Rust disagree on what ``\\w`` includes and the disagreement
+    destroys Indic text.
     """
     if not text:
         return ""
-    cleaned = _strip_accents(text.casefold())
+    cleaned = _fold_latin(text.casefold())
     cleaned = cleaned.replace("&", " and ")
-    cleaned = _TOKEN_SPLIT.sub(" ", cleaned)
+    cleaned = cleaned.translate(_SEPARATOR_TABLE)
     return _WHITESPACE.sub(" ", cleaned).strip()
 
 
@@ -208,14 +335,23 @@ def name_tokens(
     return [t for t in tokens if t not in drop]
 
 
-def normalize_name(text: str, *, drop_legal: bool = True) -> str:
+def normalize_name(
+    text: str, *, drop_legal: bool = True, drop_generic: bool = False
+) -> str:
     """Canonical name string: accent-free, casefolded, legal forms removed.
 
     Empty input returns ``""``, never ``None`` and never a null-propagating
     expression. Downstream code can therefore treat ``""`` as "no name
     evidence" without a null check.
+
+    ``drop_generic`` exists so this function has the same flag surface as
+    :func:`team_diamond.preprocessing.normalize_fast.normalize_columns`. An
+    asymmetry there is not cosmetic: it means the equivalence test cannot cover
+    a flag combination, and a divergence in that combination would be invisible.
     """
-    return " ".join(name_tokens(text, drop_legal=drop_legal))
+    return " ".join(
+        name_tokens(text, drop_legal=drop_legal, drop_generic=drop_generic)
+    )
 
 
 def address_tokens(text: str, *, expand_abbreviations: bool = True) -> list[str]:
@@ -243,7 +379,13 @@ def normalize_address(text: str, *, expand_abbreviations: bool = True) -> str:
     return " ".join(address_tokens(text, expand_abbreviations=expand_abbreviations))
 
 
-def add_normalized_columns(frame: pl.DataFrame) -> pl.DataFrame:
+def add_normalized_columns(
+    frame: pl.DataFrame,
+    *,
+    drop_legal: bool = True,
+    drop_generic: bool = False,
+    expand_abbreviations: bool = True,
+) -> pl.DataFrame:
     """Attach the normalised columns the feature layer needs.
 
     Adds, all derived from the raw columns and all reproducible from them:
@@ -276,11 +418,19 @@ def add_normalized_columns(frame: pl.DataFrame) -> pl.DataFrame:
         [
             pl.col("business_name")
             .fill_null("")
-            .map_elements(normalize_name, return_dtype=pl.Utf8)
+            .map_elements(
+                lambda t: normalize_name(
+                    t, drop_legal=drop_legal, drop_generic=drop_generic
+                ),
+                return_dtype=pl.Utf8,
+            )
             .alias("name_norm"),
             pl.col("business_address")
             .fill_null("")
-            .map_elements(normalize_address, return_dtype=pl.Utf8)
+            .map_elements(
+                lambda t: normalize_address(t, expand_abbreviations=expand_abbreviations),
+                return_dtype=pl.Utf8,
+            )
             .alias("addr_norm"),
         ]
     ).with_columns(
