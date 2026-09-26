@@ -3,10 +3,6 @@ import os
 import sys
 import json
 
-# Resolve paths relative to the repo root (script lives in EDA/)
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
-
 def safe_print(obj):
     """Convert polars objects to JSON-serializable and print"""
     if hasattr(obj, 'to_dict'):
@@ -91,31 +87,19 @@ for name, df in [("S1", s1), ("S2", s2), ("S3", s3)]:
 
 print("\n=== ADDRESS LENGTH STATS ===")
 for name, df in [("S1", s1), ("S2", s2), ("S3", s3)]:
-    # Filter out null addresses before computing length stats (S2/S3 have ~3.4% nulls)
-    non_null_df = df.filter(pl.col('business_address').is_not_null())
-    lengths = non_null_df['business_address'].str.len_chars()
-    null_count = df.shape[0] - non_null_df.shape[0]
+    lengths = df['business_address'].str.len_chars()
     stats = {
-        "mean": float(lengths.mean()) if lengths.len() > 0 else 0.0,
-        "median": float(lengths.median()) if lengths.len() > 0 else 0.0,
-        "min": int(lengths.min()) if lengths.len() > 0 else 0,
-        "max": int(lengths.max()) if lengths.len() > 0 else 0,
-        "null_addresses": null_count
+        "mean": float(lengths.mean()),
+        "median": float(lengths.median()),
+        "min": int(lengths.min()),
+        "max": int(lengths.max())
     }
     safe_print({name: stats})
 
 print("\n=== GROUND TRUTH ANALYSIS ===")
 print(f"GT rows: {gt.shape[0]}")
-# NOTE: str.split(',') on empty string "" returns [""] (length 1), NOT [] (length 0).
-# We must fix this: empty matched_entity_ids means 0 matches, not 1.
 gt_parsed = gt.with_columns([
-    pl.col('matched_entity_ids').str.split(',').list.len().alias('num_matches_raw')
-])
-gt_parsed = gt_parsed.with_columns([
-    pl.when(pl.col('matched_entity_ids') == '').then(0)
-      .when(pl.col('matched_entity_ids').is_null()).then(0)
-      .otherwise(pl.col('num_matches_raw'))
-      .alias('num_matches')
+    pl.col('matched_entity_ids').str.split(',').list.len().alias('num_matches')
 ])
 vc = gt_parsed['num_matches'].value_counts().sort('num_matches')
 safe_print({"match_cardinality": vc.to_dict()})
@@ -135,6 +119,3 @@ for country in ['US', 'India']:
     subset = gt_parsed.filter(gt_with_country['country'] == country)
     if subset.shape[0] > 0:
         print(f"  {country}: avg_matches={float(subset['num_matches'].mean()):.2f}, singletons={(subset['num_matches'] == 0).sum()}")
-
-if __name__ != '__main__':
-    pass  # Allow import without auto-executing
