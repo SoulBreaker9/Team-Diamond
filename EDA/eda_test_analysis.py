@@ -14,7 +14,23 @@ def safe_print(obj):
     else:
         print(obj)
 
-test_dir = os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset/test")
+# Resilient dataset path resolution
+def find_dataset_dir():
+    candidates = [
+        os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset"),
+        os.path.join(os.path.dirname(REPO_ROOT), "6ab10eb3b23ba_student_resource/student_resource/dataset"),
+        os.path.join(os.path.dirname(REPO_ROOT), "data/6ab10eb3b23ba_student_resource/student_resource/dataset"),
+        os.path.join(REPO_ROOT, "dataset"),
+        os.path.join(os.path.dirname(REPO_ROOT), "dataset")
+    ]
+    for c in candidates:
+        if os.path.exists(os.path.join(c, "train")):
+            return c
+    return candidates[0]
+
+DATASET_DIR = find_dataset_dir()
+train_dir = os.path.join(DATASET_DIR, "train")
+test_dir = os.path.join(DATASET_DIR, "test")
 
 print("=== TEST DATA ANALYSIS ===")
 s1_test = pl.read_csv(os.path.join(test_dir, "test_source1.tsv"), separator="\t", n_rows=100000)
@@ -70,7 +86,6 @@ for name, df in [("S1_test", s1_test), ("S2_test", s2_test), ("S3_test", s3_test
 
 # Compare train vs test distributions
 print("\n=== TRAIN vs TEST DISTRIBUTION COMPARISON ===")
-train_dir = os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train")
 s1_train = pl.read_csv(os.path.join(train_dir, "train_source1.tsv"), separator="\t", n_rows=100000)
 s2_train = pl.read_csv(os.path.join(train_dir, "train_source2.tsv"), separator="\t", n_rows=100000)
 s3_train = pl.read_csv(os.path.join(train_dir, "train_source3.tsv"), separator="\t", n_rows=100000)

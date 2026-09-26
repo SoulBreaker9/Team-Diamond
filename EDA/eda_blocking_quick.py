@@ -74,7 +74,23 @@ def compute_recall_by_country(sample_s1_ids, s1_dict, gt_map, get_candidates_fn)
         if s['total'] > 0:
             print(f"  {key}: Recall={s['recalled']}/{s['total']} ({s['recalled']/s['total']*100:.1f}%), Avg cands={s['cands']/n:.0f}")
 
-train_dir = os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train")
+# Resilient dataset path resolution
+def find_dataset_dir():
+    candidates = [
+        os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset"),
+        os.path.join(os.path.dirname(REPO_ROOT), "6ab10eb3b23ba_student_resource/student_resource/dataset"),
+        os.path.join(os.path.dirname(REPO_ROOT), "data/6ab10eb3b23ba_student_resource/student_resource/dataset"),
+        os.path.join(REPO_ROOT, "dataset"),
+        os.path.join(os.path.dirname(REPO_ROOT), "dataset")
+    ]
+    for c in candidates:
+        if os.path.exists(os.path.join(c, "train")):
+            return c
+    return candidates[0]
+
+DATASET_DIR = find_dataset_dir()
+train_dir = os.path.join(DATASET_DIR, "train")
+test_dir = os.path.join(DATASET_DIR, "test")
 
 # Load full datasets
 print("Loading data...")

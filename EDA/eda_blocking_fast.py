@@ -51,7 +51,23 @@ def get_address_tokens(address, max_tokens=10):
         return all_tokens
     return list(dict.fromkeys(all_tokens[:5] + all_tokens[-5:]))
 
-train_dir = os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset/train")
+# Resilient dataset path resolution
+def find_dataset_dir():
+    candidates = [
+        os.path.join(REPO_ROOT, "data/6ab10eb3b23ba_student_resource/student_resource/dataset"),
+        os.path.join(os.path.dirname(REPO_ROOT), "6ab10eb3b23ba_student_resource/student_resource/dataset"),
+        os.path.join(os.path.dirname(REPO_ROOT), "data/6ab10eb3b23ba_student_resource/student_resource/dataset"),
+        os.path.join(REPO_ROOT, "dataset"),
+        os.path.join(os.path.dirname(REPO_ROOT), "dataset")
+    ]
+    for c in candidates:
+        if os.path.exists(os.path.join(c, "train")):
+            return c
+    return candidates[0]
+
+DATASET_DIR = find_dataset_dir()
+train_dir = os.path.join(DATASET_DIR, "train")
+test_dir = os.path.join(DATASET_DIR, "test")
 
 # Load full datasets
 print("Loading data...")
