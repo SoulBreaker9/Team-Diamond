@@ -1,0 +1,14 @@
+numpy
+pandas
+polars
+pyarrow
+
+ipykernel
+jupyter
+jupyterlab
+
+sagemaker
+boto3
+
+pyyaml
+tqdm
