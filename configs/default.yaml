@@ -1,0 +1,32 @@
+# Default configuration — Team Diamond
+#
+# Every value here is a PLACEHOLDER unless an experiment selected it.
+# `null` means "not yet measured", NOT "use the library default".
+# See AGENTS.md §Configuration and DOCS/experiments.md.
+#
+# Precedence: default.yaml  <-  <component>.yaml  <-  CLI overrides
+
+project:
+  name: team-diamond
+  # Dataset root. MUST exist on disk; paths.py fails loudly otherwise (AGENTS.md §5).
+  # null => auto-discover from a small candidate list, still with an existence check.
+  data_root: null
+  artifacts_dir: artifacts
+
+  seed: 20260926          # single project-wide seed; per-stage seeds derive from it
+
+runtime:
+  # Observed on the dev machine. The full-dataset stages do NOT fit here.
+  # Re-measure on the execution host before trusting any budget: see AGENTS.md §4.
+  dev_machine_forensics:
+    cores: null
+    ram_gb: null
+    gpu: null
+    disk_free_gb: null
+
+evaluation:
+  # The competition metric. Entity-level MACRO F0.5 (DOCS/glossary.md).
+  metric: macro_f0_5
+  # Score singletons (m=0) as 1.0 when we correctly emit an empty list.
+  # VERIFIED against the official scorer via the G1 empty-submission probe.
+  singleton_credit: 1.0

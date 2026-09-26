@@ -1,0 +1,36 @@
+# Pair feature generation — Team Diamond
+#
+# STATUS: PROPOSAL. No feature has been ablated yet (AGENTS.md §Ablation Testing).
+# The catalogue of candidate features is DOCS/feature_dictionary.md.
+#
+# Every feature must survive an ablation before it is claimed to matter.
+
+features:
+  families:
+    name_similarity: true
+    address_similarity: true
+    cross_field: true
+    retrieval_evidence: true     # rank, scores of the strategies that retrieved it
+
+  name:
+    # rapidfuzz scorers. Ratio = indel, token_set = order-insensitive, WRatio = mixed.
+    scorers: [ratio, token_sort, token_set, partial_ratio, wratio]
+    # True when both sides have an address; gates the address feature block.
+    require_address_for_address_features: true
+
+  address:
+    scorers: [ratio, token_sort, token_set]
+    # Address component keys. PIN is NOT a universal key — measured: 459 Indian
+    # PINs in S2, 410 in S3. See DOCS/competition_notes.md corrections.
+    component_keys: [house_number, street_token, city_token, postcode_token]
+
+  rarity:
+    # IDF-style weights. MUST be built from the training fold only — a global
+    # IDF over all entities leaks (AGENTS.md §Leakage Prevention, R13).
+    build_from: training_fold_only
+    idf_fields: [name, address]
+
+  # Master switch for the two-stage cascade. See suggestion.md §4.2.
+  cascade:
+    stage2a_cheap_features_only: true
+    top_k_before_stage2b: null     # null => not measured

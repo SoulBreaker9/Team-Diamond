@@ -1,0 +1,34 @@
+# Pairwise match model — Team Diamond
+#
+# STATUS: PROPOSAL. LightGBM is the documented default (AGENTS.md §Model
+# Preference); it is the right first model because engineered features are
+# expected to carry the signal. No model has been trained yet.
+
+model:
+  type: lightgbm
+  params:
+    objective: binary
+    n_estimators: null            # unmeasured; tune by experiment, not by habit
+    learning_rate: null
+    num_leaves: null
+    min_data_in_leaf: null
+    feature_fraction: null
+    bagging_fraction: null
+    bagging_freq: null
+    lambda_l1: null
+    lambda_l2: null
+    random_state: 20260926
+    n_jobs: null                  # set from the real core count, not assumed
+
+  calibration:
+    # Raw LightGBM probabilities are not usable as confidence. Isotonic on a
+    # held-out fold. See DOCS/eda.md §5.
+    method: isotonic
+    fit_on: validation_fold
+
+  hard_negatives:
+    # Negatives are drawn from the SAME retrieval system used at inference.
+    # Random negatives teach the model almost nothing (AGENTS.md §Hard Negatives).
+    source: retrieval_candidates
+    negatives_per_positive: null   # unmeasured
+    seed: 20260926

@@ -1,0 +1,52 @@
+[project]
+name = "team-diamond"
+version = "0.1.0"
+description = "Multi-source business entity resolution for the Amazon ML Challenge 2026"
+readme = "README.md"
+authors = [
+    { name = "HetMistri", email = "ganpat.hetmistri@gmail.com" }
+]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "boto3>=1.43.103",
+    "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
+    "jupyterlab>=4.6.4",
+    # LightGBM is the documented default matcher (AGENTS.md §11). Added here so
+    # the dependency is locked and reproducible rather than pip-installed ad hoc
+    # in a notebook, which is prohibited.
+    "lightgbm>=4.6.0",
+    "numpy>=2.5.3",
+    "pandas>=3.0.6",
+    "polars>=1.44.2",
+    "pyarrow>=25.0.1",
+    "pyyaml>=6.0.3",
+    # rapidfuzz: fast C++ string similarity. Chosen over fuzzywuzzy/python-Levenshtein
+    # because it needs no compiler and is ~10x faster on 10M+ comparisons, which
+    # matters at this dataset scale.
+    "rapidfuzz>=3.14.3",
+    "sagemaker>=3.23.0",
+    # scikit-learn: used ONLY for calibration (isotonic) and split helpers.
+    # NOT used for the metric — see team_diamond.evaluation.metrics for why
+    # fbeta_score cannot score this competition's singletons.
+    "scikit-learn>=1.7.2",
+    "tqdm>=4.70.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "team_diamond"
+module-root = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

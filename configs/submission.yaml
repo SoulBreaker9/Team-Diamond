@@ -1,0 +1,24 @@
+# Submission generation — Team Diamond
+#
+# Contract: AGENTS.md §Submission Contract. The row count is READ FROM THE FILE
+# at run time and is never hardcoded. Documented test S1 = 1,732,545 is WRONG;
+# the real count is 1,732,544 (measured — experiments/registry.csv E001).
+
+submission:
+  filename: matching_results.tsv
+  separator: "\t"
+  header: [source1_entity_id, matched_entity_ids]
+  # Empty string means "no match". Never None/null/nan/whitespace.
+  empty_match_value: ""
+  # Preserve the exact row order of test_source1.tsv.
+  preserve_source_order: true
+  # Hard fail if the observed row count differs from the file's S1 id count.
+  assert_row_count_matches_source: true
+
+decision:
+  # AGENTS.md §Decision Rules: do NOT use `probability > 0.5`. The value of an
+  # extra prediction depends on the entity's unobserved match cardinality.
+  # Policy A/B/C/D are compared head-to-head in suggestion.md §3.6.
+  # Ship the simplest policy statistically indistinguishable from the best.
+  policy: null                    # null => not chosen by experiment yet
+  threshold: null                 # deliberately unused unless policy = "threshold"

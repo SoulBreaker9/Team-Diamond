@@ -1,0 +1,38 @@
+# Candidate retrieval — Team Diamond
+#
+# STATUS: every cap below is a PROPOSAL. No retrieval experiment has been run.
+# The blocking-recall figures quoted in DOCS (76.2 / 85.4) have NO implementation
+# behind them — see suggestion.md §4 warning box. Measure before believing.
+#
+# AGENTS.md §Candidate Caps: caps are experimental parameters, never constants.
+
+retrieval:
+  strategies:
+    exact_name: true
+    name_token: true
+    name_char_ngram: true
+    address_token: true
+    address_char_ngram: false     # not yet implemented
+    phonetic: false               # not yet implemented
+    embeddings: false             # COMPLIANCE GATED — see suggestion.md §11.4
+
+  # Cap per strategy, per S1 entity. null => not selected by experiment yet.
+  # Rationale for proposing 400/250 is in suggestion.md §4.1b; it is a starting
+  # point for a sweep, not a decision.
+  caps:
+    us: null
+    in: null
+    fr: null
+
+  # Union cap after dedup, before the cascade. See suggestion.md §4.2.
+  union_cap: null
+
+  # Sweep grid for the cap experiment. Select by measured recall/cost, not by
+  # intuition. Report recall overall AND per country.
+  cap_sweep: [100, 150, 200, 250, 300, 400]
+
+  char_ngram:
+    min_n: 3
+    max_n: 5
+    # Jaccard threshold for accepting a char-ngram candidate. null => unmeasured.
+    jaccard_threshold: null
