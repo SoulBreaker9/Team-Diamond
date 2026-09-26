@@ -169,11 +169,11 @@ def read_csv_bytes(path: str | os.PathLike[str], *, timeout: int = 3600) -> Path
         suffix=".tsv", delete=False
     )
     try:
+        # Use simple download without transfer config to avoid version issues
         client.download_fileobj(
             location.bucket,
             location.key,
             handle,
-            Config=_transfer_config(timeout),
         )
     except Exception as error:  # noqa: BLE001 - re-raised with context
         handle.close()
