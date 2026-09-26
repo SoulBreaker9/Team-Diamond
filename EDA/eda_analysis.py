@@ -11,6 +11,9 @@ def safe_print(obj):
         print(json.dumps(obj.to_list(), ensure_ascii=False, indent=2))
     else:
         print(obj)
+# Resolve paths relative to repo root (script lives in EDA/)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
 # Resilient dataset path resolution
 def find_dataset_dir():
