@@ -975,6 +975,67 @@ How will we measure the change?
 
 **If these questions cannot be answered, do not blindly implement the change.**
 
+### SageMaker Training Approval Gate
+
+SageMaker training jobs are considered expensive/external actions.
+
+OpenCode MUST NOT launch, submit, start, resume, or retry a SageMaker
+training/processing job without explicit human approval.
+
+Before launching a SageMaker training job, OpenCode must provide:
+
+- Experiment ID
+- Git commit
+- Configuration file
+- Dataset/input locations
+- Instance type
+- Instance count
+- Estimated runtime
+- Estimated cost if available
+- Expected output/artifact locations
+- Exact command/API action that will be executed
+
+Then OpenCode MUST STOP and wait for explicit approval.
+
+The only approval phrase recognized for launching the job is:
+
+CONFIRMED
+
+The word "confirmed" appearing as part of an unrelated discussion,
+documentation, code, log, or quoted text does not constitute approval.
+
+Before receiving exactly:
+
+CONFIRMED
+
+OpenCode may:
+- inspect,
+- modify code,
+- build configurations,
+- validate inputs,
+- run lightweight/local tests,
+- perform dry runs,
+- estimate resources,
+- prepare the training command.
+
+Before receiving exactly:
+
+CONFIRMED
+
+OpenCode must NOT:
+- create a SageMaker training job,
+- start a SageMaker processing job,
+- launch expensive GPU/CPU compute,
+- trigger a large-scale training pipeline,
+- retry a failed expensive job,
+- launch a replacement job automatically.
+
+After receiving CONFIRMED, launch only the exact job that was presented
+for approval. If the configuration, instance type, dataset, or other
+material parameter changes, request approval again.
+
+Never interpret previous approval as approval for a different experiment.
+
 ### Final rules
 
 1. Protect data integrity.

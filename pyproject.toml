@@ -9,6 +9,10 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "boto3>=1.43.103",
+    # CatBoost: the matcher, per explicit team decision. See
+    # experiments/registry.csv for the LightGBM-vs-CatBoost comparison; both are
+    # locked so the choice is reversible by configuration, not by reinstalling.
+    "catboost>=1.2.8",
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
     "jupyterlab>=4.6.4",
