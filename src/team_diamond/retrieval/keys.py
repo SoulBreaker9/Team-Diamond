@@ -119,7 +119,14 @@ def _long(
         pl.col(id_column).cast(pl.Utf8).alias("row_id"), "key"
     )
     if explode:
-        out = out.explode("key")
+        # `empty_as_null=True` is spelled out rather than left to the default:
+        # Polars 2.0 flips it to False. Either way the row is dropped by the
+        # length filter below (a null yields null, and `filter` keeps only
+        # True), so the *outcome* is identical -- but relying on a default that
+        # is scheduled to change means a future upgrade silently alters key
+        # construction, and a retrieval recall number is not something to
+        # rediscover from scratch.
+        out = out.explode("key", empty_as_null=True)
     return out.filter(pl.col("key").str.len_chars() > 0).unique()
 
 

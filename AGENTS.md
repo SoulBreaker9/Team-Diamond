@@ -975,6 +975,81 @@ How will we measure the change?
 
 **If these questions cannot be answered, do not blindly implement the change.**
 
+### No evaluation-set overfitting
+
+The agent MUST NOT modify production logic specifically to satisfy
+known evaluation examples unless those examples are part of the
+documented training/validation protocol.
+
+Do not:
+
+- hardcode known validation entity IDs;
+- hardcode known candidate pairs;
+- create rules triggered by specific fixture/entity IDs;
+- tune thresholds against hidden/test labels;
+- inspect test outcomes and then encode rules to reproduce them;
+- use leaderboard submissions as a substitute for local validation.
+
+If an observed example motivates a general improvement, formulate the
+general hypothesis, implement the general mechanism, and validate it
+on an independent split.
+
+## Test Integrity / Anti-Gaming Rules
+
+Tests are verification mechanisms, not obstacles to bypass.
+
+### Never game tests
+
+The agent MUST NOT:
+
+- hardcode expected test outputs or fixture-specific answers;
+- detect whether code is running under pytest and change behaviour;
+- detect test filenames, test function names, fixture values, or test-only environment variables to alter production behaviour;
+- add special-case branches whose only purpose is to satisfy an existing test;
+- weaken, delete, skip, xfail, or otherwise disable a failing test merely to make the suite pass;
+- modify assertions, expected values, fixtures, or test inputs solely to accommodate an incorrect implementation;
+- mock the system under test in a way that bypasses the behaviour the test is supposed to verify;
+- bypass validation, schema checks, leakage checks, scale guards, or submission checks solely to make tests pass;
+- report a test as passing without actually executing it.
+
+### Tests may be changed only when
+
+A test is allowed to change when:
+
+1. the specification or intended behaviour has genuinely changed;
+2. the existing test is demonstrably incorrect or incomplete;
+3. the change is explained in the commit/diff;
+4. the implementation and test are both reviewed against the actual requirement.
+
+Never change a test simply because the implementation fails it.
+
+### Production-code independence
+
+Production code MUST behave identically whether executed:
+
+- under pytest,
+- from a CLI,
+- from a notebook,
+- in a SageMaker job,
+- or in the final inference pipeline,
+
+unless an explicit environment-dependent behaviour is part of the documented design.
+
+### Real-data verification
+
+Passing unit tests is insufficient evidence for ML correctness.
+
+For ML/data-pipeline changes, also verify against representative real challenge data where practical.
+
+A report must distinguish:
+
+- `Tests passed`
+- `Real-data validation passed`
+- `Measured metric`
+- `Not measured`
+
+Never treat synthetic test success as evidence of challenge performance.
+
 ### SageMaker Training Approval Gate
 
 SageMaker training jobs are considered expensive/external actions.

@@ -623,12 +623,7 @@ def build_pair_features(
         pl.col("cand_count_s1").cast(pl.Float32).alias("cand_count_s1"),
         pl.col("cand_count_vendor").cast(pl.Float32).alias("cand_count_vendor"),
         pl.col("strategy_rank").cast(pl.Float32).alias("strategy_rank"),
-        (
-            pl.min_horizontal(pl.col("strategy_rank"), pl.lit(1, dtype=pl.Int32))
-            == 1
-        )
-        .cast(pl.Float32)
-        .alias("is_top1_by_key_count"),
+        (pl.col("strategy_rank") == 1).cast(pl.Float32).alias("is_top1_by_key_count"),
         pl.col("s1_name_key_df").cast(pl.Float32).alias("s1_name_key_df"),
     )
 

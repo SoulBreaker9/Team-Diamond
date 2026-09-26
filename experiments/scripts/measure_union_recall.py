@@ -61,6 +61,7 @@ import polars as pl
 
 from team_diamond.data import DatasetPaths, load_ground_truth, load_split
 from team_diamond.preprocessing.normalize_fast import normalize_columns
+from team_diamond.retrieval.candidates import generate_candidates, RetrievalPlan
 from team_diamond.retrieval.keys import (
     build_address_exact_keys,
     build_address_token_keys,
@@ -73,6 +74,7 @@ from team_diamond.retrieval.keys import (
 )
 
 DEFAULT_QUERY_ROWS = 200_000
+DEFAULT_CAP_SWEEP_SAMPLE = 10_000  # Vendor pool size for local cap sweep
 
 # Document-frequency ceilings for the token strategies. Chosen from the sweep in
 # measure_blocking_recall.py; recorded here as explicit values so this script is
@@ -91,6 +93,13 @@ PLAN: list[tuple[str, object, int | None]] = [
     ("address_token", build_address_token_keys, ADDRESS_TOKEN_MAX_DF),
     ("numeric_token", build_numeric_keys, NUMERIC_MAX_DF),
 ]
+
+# Cap sweep values for Experiment B. These are PROPOSALS until measured.
+CAP_SWEEP: list[int] = [100, 150, 200, 250, 300, 400]
+
+def _plan_objects() -> list:
+    """Get PLAN as RetrievalPlan objects for generate_candidates."""
+    return [RetrievalPlan(name=p[0], builder=p[1], max_df=p[2]) for p in PLAN]
 
 
 def rss_gb() -> float:
@@ -158,7 +167,7 @@ def hits_for_strategy(
 
     query_keys = builder(queries.lazy()).collect()
     if kept is not None:
-        query_keys = query_keys.join(kept, on="key", how="semi")
+        query_keys = query_keys.join(kept.collect(), on="key", how="semi")
     query_keys = query_keys.select("row_id", "key").unique()
 
     hits = (
@@ -178,6 +187,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--query-rows", type=int, default=DEFAULT_QUERY_ROWS)
     parser.add_argument("--seed", type=int, default=17)
+    parser.add_argument("--cap-sweep", action="store_true", default=False,
+                        help="Run cap sweep after uncapped measurement. "
+                             "Defaults to small vendor sample unless --full-corpus is set.")
+    parser.add_argument("--full-corpus", action="store_true", default=False,
+                        help="Run cap sweep on full 10.3M vendor corpus. "
+                             "REQUIRES SAGEMAKER WITH 32GB RAM. Do not use locally.")
     args = parser.parse_args()
 
     paths = DatasetPaths.discover()
@@ -271,6 +286,122 @@ def main() -> None:
     print(f"{'UNION':16} {'-':>8} {u_pair:>11.4f}  {u_ent:>13.4f}")
 
     # --- the ceiling ---------------------------------------------------------
+    print("\nREACHABILITY OF F0.5 (assumes a PERFECT classifier on these candidates)")
+    print(f"{'pair recall R':>16} {'best possible F0.5':>21}")
+    for r in (u_pair, 0.60, 0.70, 0.75, 0.7917, 0.85, 0.90, 0.95):
+        best = 1.25 * r / (0.25 + r)
+        if abs(r - u_pair) < 1e-9:
+            marker = "  <-- measured ceiling"
+        elif abs(r - 0.7917) < 1e-4:
+            marker = "  <-- R required for F0.5 = 0.95"
+        else:
+            marker = ""
+        print(f"{r:>16.4f} {best:>21.4f}{marker}")
+
+    # --- where recall is lost ------------------------------------------------
+    print("\nWHERE THE REMAINING RECALL IS LOST")
+    missed = found.filter(pl.col("bit") == 0)
+    print(
+        f"  missed true pairs: {missed.height:,} of {n_pairs:,} "
+        f"({100 * missed.height / n_pairs:.2f}%)"
+    )
+    print("  strategy that came closest, for pairs that strategy did not retrieve:")
+    for index, (name, bit, _, _) in enumerate(per_strategy):
+        got = (found["bit"] & bit) > 0
+        n_got = int(got.sum())
+        print(
+            f"    {name:16} retrieved {n_got:>9,}  "
+            f"({100 * n_got / n_pairs:6.2f}% of all true pairs)"
+        )
+
+    # How much of the loss is addressable: a pair retrieved by exactly one
+    # strategy was nearly reachable, a pair retrieved by none was not.
+    total_bits = (1 << len(PLAN)) - 1
+    print(
+        f"  pairs no strategy retrieved:      "
+        f"{int((found['bit'] == 0).sum()):>9,}"
+    )
+    print(
+        f"  pairs retrieved by exactly one:   "
+        f"{int(((found['bit'] > 0) & (found['bit'] < total_bits)).sum()):>9,}"
+    )
+    # --- cap sweep -----------------------------------------------------------
+    # The uncapped measurement above is the reference ceiling.
+    # Now measure recall at each cap value to quantify the recall cost of capping.
+    if not args.cap_sweep:
+        log("Cap sweep skipped (use --cap-sweep to enable)")
+    else:
+        log("Starting cap sweep...")
+
+        # Determine vendor pool for cap sweep
+        if args.full_corpus:
+            # Full corpus - requires 32GB+ RAM, only safe on SageMaker
+            log("WARNING: Running cap sweep on FULL 10.3M vendor corpus. "
+                "This requires 32GB+ RAM. Ensure you are on SageMaker ml.r5.xlarge.")
+            vendors_for_gen = vendors
+            cap_sweep_label = "FULL CORPUS"
+        else:
+            # Local safe mode: use a small vendor sample
+            log(f"Local cap sweep mode: using {DEFAULT_CAP_SWEEP_SAMPLE:,} vendor sample "
+                f"(not full corpus). Use --full-corpus on SageMaker for real results.")
+            vendors_for_gen = vendors.sample(n=min(DEFAULT_CAP_SWEEP_SAMPLE, vendors.height), seed=args.seed + 100)
+            cap_sweep_label = f"SAMPLE ({DEFAULT_CAP_SWEEP_SAMPLE:,} vendors)"
+
+        cap_results: list[dict] = []
+
+        # queries already has entity_id, name_norm, addr_norm, country
+        queries_for_gen = queries.select("entity_id", "name_norm", "addr_norm", "country")
+
+        plan_objs = _plan_objects()
+
+        for cap in CAP_SWEEP:
+            log(f"  Cap sweep ({cap_sweep_label}): cap_per_query={cap}")
+            candidates, report = generate_candidates(
+                queries_for_gen,
+                vendors_for_gen,
+                plan=plan_objs,
+                cap_per_query=cap,
+                allow_unmeasured_cap=True,  # This is the measurement sweep itself
+                query_id_column="entity_id",
+                vendor_id_column="entity_id",
+            )
+
+            # Join candidates with true_pairs to measure recall at this cap
+            # true_pairs uses row_id (entity_id), candidates uses s1_id (entity_id)
+            hits = true_pairs.join(
+                candidates.select("s1_id", "vendor_id"),
+                left_on=["row_id", "vendor_id"],
+                right_on=["s1_id", "vendor_id"],
+                how="semi"
+            )
+            pair_r = hits.height / n_pairs
+            entity_r = hits["row_id"].n_unique() / n_entities
+
+            cap_results.append({
+                "cap": cap,
+                "pair_recall": round(pair_r, 6),
+                "entity_recall": round(entity_r, 6),
+                "candidates": candidates.height,
+                "candidates_per_query_median": int(candidates.group_by("s1_id").len()["len"].median()),
+                "candidates_per_query_p95": int(candidates.group_by("s1_id").len()["len"].quantile(0.95)),
+                "candidates_per_query_max": int(candidates.group_by("s1_id").len()["len"].max()),
+                "dropped_by_cap": report.n_dropped_by_cap,
+            })
+            log(f"    cap={cap:>4}  pair_recall={pair_r:.4f}  entity_recall={entity_r:.4f}  candidates={candidates.height:,}")
+
+        # Print cap sweep summary
+        print(f"\nCAP SWEEP RESULTS ({cap_sweep_label} - uncapped reference ceiling above)")
+        print(f"{'cap':>6} {'pair recall':>12} {'entity recall':>14} {'candidates':>12} {'median/q':>10} {'p95/q':>10} {'max/q':>8} {'dropped':>10}")
+        print("-" * 90)
+        for cr in cap_results:
+            print(
+                f"{cr['cap']:>6} {cr['pair_recall']:>11.4f}  {cr['entity_recall']:>13.4f}  "
+                f"{cr['candidates']:>12,}  {cr['candidates_per_query_median']:>10,}  "
+                f"{cr['candidates_per_query_p95']:>10,}  {cr['candidates_per_query_max']:>8,}  "
+                f"{cr['dropped_by_cap']:>10,}"
+            )
+
+    # --- the ceiling (uncapped) ---------------------------------------------
     print("\nREACHABILITY OF F0.5 (assumes a PERFECT classifier on these candidates)")
     print(f"{'pair recall R':>16} {'best possible F0.5':>21}")
     for r in (u_pair, 0.60, 0.70, 0.75, 0.7917, 0.85, 0.90, 0.95):
