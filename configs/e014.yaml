@@ -1,0 +1,75 @@
+# E014 — document-frequency ceiling sweep. Team Diamond.
+#
+# STATUS: PROPOSAL. No variant has run. Do not quote any number here as measured.
+#
+# Question: does raising the DF ceilings recover enough true pairs to justify
+# the additional candidate-generation cost?
+#
+# Baseline (E011, MEASURED): union pair recall 0.7766 at ceilings
+# name_token<=50, address_token<=200, numeric_token<=200. F_0.5 >= 0.95 needs
+# pair recall >= 0.7917, so the sweep must find >= ~1.5 points of recall
+# before the matcher is worth touching.
+#
+# Design: fixed query sample, full vendor pool, identical normalization and
+# ground truth, seed 17 throughout. One ceiling moves per variant (V1-V3);
+# V4 checks the interaction only — the promotion decision is made on V1-V3.
+# Every variant saves its bitmask; the miss partition is rerun per variant
+# via analyze_retrieval_misses.py --bitmask-input.
+#
+# Screen on 20,000 queries first (cheap), then confirm ONLY the promoted
+# variant at the full 200,000-query E011 scale. A variant that wins on 20K
+# but cannot be confirmed at 200K is not promoted.
+#
+# Success criterion: marginal recalled pairs per additional candidate-pair
+# volume (candidate_volume block) is reported for every variant, AND the
+# absolute union gain is large enough to matter against the 0.7917 target.
+# A variant that adds millions of pairs for a handful of recalls fails even
+# if its recall delta is positive.
+
+e014:
+  seed: 17
+  screen_query_rows: 20000
+  confirm_query_rows: 200000
+  vendor_pool: train source2 + source3, full (10,320,219)
+  normalization: identical (normalize_columns defaults)
+  ground_truth: train (labels never touch test)
+
+  baseline_ceilings: # == E011. `--ceiling` absent.
+    name_token: 50
+    address_token: 200
+    numeric_token: 200
+
+  variants: # `--ceiling` flags per variant. Nothing else changes.
+    V0_baseline: []
+    V1_name_token_200:
+      - name_token=200
+    V2_address_token_1000:
+      - address_token=1000
+    V3_numeric_token_1000:
+      - numeric_token=1000
+    V4_combined_200_1000_1000:
+      - name_token=200
+      - address_token=1000
+      - numeric_token=1000
+
+  per_variant_artifacts:
+    bitmask: experiments/results/E014_<variant>_bitmask.parquet
+    report: experiments/results/E014_<variant>_recall.json
+    miss_analysis: experiments/results/E014_<variant>_miss_analysis.json
+
+  record_per_variant:
+    - pair recall and entity hit-rate (bitmask report)
+    - coverage histogram (bitmask report)
+    - recall_by_country (bitmask report)
+    - candidate_volume per strategy (bitmask report)
+    - marginal recovered pairs vs V0 (same sample => paired comparison)
+    - recall gained per additional candidate-pair volume
+    - miss partition rerun (analyze script on the variant bitmask)
+    - runtime and peak RSS
+
+  forbidden: # absolute; a run that does any of these is invalid
+    - test data or test labels
+    - external lookup
+    - model training
+    - new retrieval strategies (no n-grams, embeddings, transliteration, fuzzy)
+    - changing the four exact strategies or normalization

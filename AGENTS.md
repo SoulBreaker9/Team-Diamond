@@ -3,6 +3,9 @@
 > **Amazon ML Challenge 2026** — multi-source business entity resolution.
 > Entity-level macro $F_{0.5}$, where precision is weighted more heavily than recall.
 
+## Mem0 Usage:
+Periodically, push relevant context to mem0 so that GPT and Opencode in Jupyter Space stays in sync. Update the existing memory when something updates.
+
 ---
 
 ## 0. How to use this file
@@ -12,13 +15,14 @@ It is not a textbook and it is not a strategy document.
 
 The agent context is layered. Know which layer you are reading before you act:
 
-| Layer | File | Contains | Authority |
-|:--|:--|:--|:--|
-| **Rules** | `AGENTS.md` | engineering behaviour, invariants, constraints, workflow | **OBEY** |
-| **Thinking** | `suggestion.md` | current strategy, hypotheses, proposals, experiment queue | **VERIFY BEFORE TREATING AS FACT** |
-| **Reference** | `DOCS/` | glossary, architecture, competition notes, feature catalogue, experiment method | **LOOK UP** |
-| **Evidence** | `experiments/registry.csv` | measured results | **TRUST, if it exists** |
-| **Code** | `src/` | the actual implementation | **THE TRUTH** |
+| Layer               | File                         | Contains                                                                        | Authority                                |
+| :------------------ | :--------------------------- | :------------------------------------------------------------------------------ | :--------------------------------------- |
+| **Reasoning** | `ml-expert` skill + global `ml-*` commands | generic senior-ML discipline and workflow orchestration            | **USE where available**            |
+| **Rules**     | `AGENTS.md` (this file)  | engineering behaviour, invariants, constraints, workflow                        | **OBEY — overrides generic guidance**                           |
+| **Thinking**  | `suggestion.md`            | current strategy, hypotheses, proposals, experiment queue                       | **VERIFY BEFORE TREATING AS FACT** |
+| **Reference** | `DOCS/`                    | glossary, architecture, competition notes, feature catalogue, experiment method | **LOOK UP**                        |
+| **Evidence**  | `experiments/registry.csv` | measured results                                                                | **TRUST, if it exists**            |
+| **Code**      | `src/`                     | the actual implementation                                                       | **THE TRUTH**                      |
 
 Three consequences:
 
@@ -33,13 +37,13 @@ Three consequences:
 Every substantive claim in this project carries one of these. They are used in
 `suggestion.md` and in experiment records, and you must use them when reporting:
 
-| Label | Meaning |
-|:--|:--|
-| **VERIFIED** | Confirmed from official challenge material, executable code, or exhaustive re-derivation. |
-| **MEASURED** | Observed through our own EDA or a reproducible experiment on the current data. |
-| **HYPOTHESIS** | Plausible, not yet tested. |
-| **PROPOSAL** | An engineering choice intended to be evaluated. |
-| **PRELIMINARY** | Measured, but on too small a sample to act on. |
+| Label                 | Meaning                                                                                   |
+| :-------------------- | :---------------------------------------------------------------------------------------- |
+| **VERIFIED**    | Confirmed from official challenge material, executable code, or exhaustive re-derivation. |
+| **MEASURED**    | Observed through our own EDA or a reproducible experiment on the current data.            |
+| **HYPOTHESIS**  | Plausible, not yet tested.                                                                |
+| **PROPOSAL**    | An engineering choice intended to be evaluated.                                           |
+| **PRELIMINARY** | Measured, but on too small a sample to act on.                                            |
 
 **Never present a HYPOTHESIS or a PROPOSAL as a measured fact.** If you cannot state the
 evidence status of a number, say "not measured yet".
@@ -56,7 +60,8 @@ Challenge 2026. The task is:
 
 The system must handle noisy names, noisy addresses, missing addresses, formatting
 differences, abbreviations, Unicode and multilingual variation, multiple valid matches,
-singleton / no-match entities, country distribution shift, ~26M records, and a
+singleton / no-match entities, country distribution shift, ~11.7M records
+(MEASURED: 11,702,133 across train+test sources, E000), and a
 precision-sensitive metric.
 
 **The objective is not the fanciest entity-resolution system.** It is:
@@ -69,17 +74,17 @@ heavily than recall. Optimise accordingly, and never assume recall is free.
 
 ### Reference material
 
-| Need | Read |
-|:--|:--|
-| Terminology, failure taxonomy | [`DOCS/glossary.md`](DOCS/glossary.md) |
-| Layer model, source layout, config, escalation order | [`DOCS/architecture.md`](DOCS/architecture.md) |
-| What the dataset actually is, and known doc errors | [`DOCS/competition_notes.md`](DOCS/competition_notes.md) |
-| Candidate features by family | [`DOCS/feature_dictionary.md`](DOCS/feature_dictionary.md) |
-| How to run and record an experiment | [`DOCS/experiments.md`](DOCS/experiments.md) |
-| Final method write-up | `DOCS/methodology.md` (intentionally unwritten — see that file) |
-| Current strategy and open decisions | [`suggestion.md`](suggestion.md) |
-| Exploratory data analysis | `DOCS/eda.md`, `DOCS/eda_analysis_and_behaviour.md` |
-| Official materials | `DOCS/Problem Statement/` |
+| Need                                                 | Read                                                               |
+| :--------------------------------------------------- | :----------------------------------------------------------------- |
+| Terminology, failure taxonomy                        | [`DOCS/glossary.md`](DOCS/glossary.md)                            |
+| Layer model, source layout, config, escalation order | [`DOCS/architecture.md`](DOCS/architecture.md)                    |
+| What the dataset actually is, and known doc errors   | [`DOCS/competition_notes.md`](DOCS/competition_notes.md)          |
+| Candidate features by family                         | [`DOCS/feature_dictionary.md`](DOCS/feature_dictionary.md)        |
+| How to run and record an experiment                  | [`DOCS/experiments.md`](DOCS/experiments.md)                      |
+| Final method write-up                                | `DOCS/methodology.md` (intentionally unwritten — see that file) |
+| Current strategy and open decisions                  | [`suggestion.md`](suggestion.md)                                  |
+| Exploratory data analysis                            | `DOCS/eda.md`, `DOCS/eda_analysis_and_behaviour.md`            |
+| Official materials                                   | `DOCS/Problem Statement/`                                        |
 
 ---
 
@@ -87,6 +92,11 @@ heavily than recall. Optimise accordingly, and never assume recall is free.
 
 Act as a **senior ML engineer, senior software engineer, and competition engineering
 advisor**. Your job is not merely to write code.
+
+For ML reasoning and experimentation discipline, use the `ml-expert` skill and the
+global `ml-*` commands where available. They supply the generic method; this file
+supplies the project-specific constraints, and **this file wins every conflict**
+between generic guidance and project rules.
 
 You must:
 
@@ -159,12 +169,12 @@ Python 3.12.x
 uv
 ```
 
-| Item | Rule |
-|:--|:--|
-| Dependency source of truth | `pyproject.toml` + `uv.lock`, both committed |
-| Generated environment | `.venv/` — **never commit it** |
-| Second dependency file | **Do not create one.** A separate hand-edited `requirements.txt` is prohibited unless the team explicitly decides otherwise |
-| Notebook installs | **Prohibited.** Do not `pip install` inside a notebook |
+| Item                       | Rule                                                                                                                                |
+| :------------------------- | :---------------------------------------------------------------------------------------------------------------------------------- |
+| Dependency source of truth | `pyproject.toml` + `uv.lock`, both committed                                                                                    |
+| Generated environment      | `.venv/` — **never commit it**                                                                                             |
+| Second dependency file     | **Do not create one.** A separate hand-edited `requirements.txt` is prohibited unless the team explicitly decides otherwise |
+| Notebook installs          | **Prohibited.** Do not `pip install` inside a notebook                                                                      |
 
 ```bash
 uv sync                       # create or synchronise .venv from uv.lock
@@ -305,11 +315,11 @@ worse pipeline.
 
 Three questions, three different owners — do not conflate them:
 
-| Question | Owner | Output |
-|:--|:--|:--|
-| *Could* this candidate be the match? | Retrieval | a candidate set |
-| *How likely* is this candidate to be the match? | Matching | a calibrated probability |
-| *Should* we emit this candidate? | Decision | a final id list |
+| Question                                          | Owner     | Output                   |
+| :------------------------------------------------ | :-------- | :----------------------- |
+| *Could* this candidate be the match?            | Retrieval | a candidate set          |
+| *How likely* is this candidate to be the match? | Matching  | a calibrated probability |
+| *Should* we emit this candidate?                | Decision  | a final id list          |
 
 See [`DOCS/architecture.md`](DOCS/architecture.md) for the full layer model.
 
@@ -382,8 +392,7 @@ Binding rules regardless of what the docs say:
 
 Test contains a jurisdiction absent from training. Therefore:
 
-**Do not build hardcoded country branches** such as `if country == "India": … elif
-country == "US": …` unless there is a measured, documented reason. Prefer
+**Do not build hardcoded country branches** such as `if country == "India": … elif country == "US": …` unless there is a measured, documented reason. Prefer
 language-agnostic mechanisms.
 
 When a country-specific artefact is genuinely needed (legal-form suffixes, address
@@ -486,6 +495,10 @@ Every retrieval experiment must report:
 - duplicate rate.
 
 A retrieval system with unacceptable recall cannot be rescued by a better matcher.
+
+The current measured baseline is E011 (see §21): union pair recall 0.7766,
+union entity hit rate 0.9525. Retrieval is the confirmed binding constraint —
+do not start matcher optimisation on the theory that it is.
 
 ### Candidate caps
 
@@ -668,8 +681,9 @@ Avoid repeated full copies of multi-million-row tables. Use compact dtypes, Pola
 selective columns, persisted indexes, and chunking only where genuinely necessary.
 
 **Never assume a machine with enough RAM for the raw data also has enough for** raw data
+
 + indexes + candidate pairs + feature matrices + model + temporary copies. Model the
-peak, not the steady state.
+  peak, not the steady state.
 
 ---
 
@@ -729,8 +743,10 @@ Result:    ...
 
 Record every meaningful experiment in
 [`experiments/registry.csv`](experiments/registry.csv) with: `experiment_id`, `date`,
-`component`, `change`, `dataset_split`, `git_commit`, `seed`, `candidate_recall`,
-`pair_precision`, `pair_recall`, `entity_f05`, `runtime`, `memory`, `notes`.
+`component`, `objective`, `baseline`, `change`, `configuration`, `dataset_split`,
+`sample`, `seed`, `candidate_recall`, `pair_precision`, `pair_recall`, `entity_f05`,
+`runtime`, `memory`, `artifacts`, `git_commit`, `evidence_status`, `interpretation`,
+`limitations`, `notes`.
 
 Method detail: [`DOCS/experiments.md`](DOCS/experiments.md).
 
@@ -1084,6 +1100,7 @@ Before receiving exactly:
 CONFIRMED
 
 OpenCode may:
+
 - inspect,
 - modify code,
 - build configurations,
@@ -1098,6 +1115,7 @@ Before receiving exactly:
 CONFIRMED
 
 OpenCode must NOT:
+
 - create a SageMaker training job,
 - start a SageMaker processing job,
 - launch expensive GPU/CPU compute,
@@ -1134,3 +1152,58 @@ Never interpret previous approval as approval for a different experiment.
 The objective: **build the most reliable, measurable, reproducible, computationally
 practical entity-resolution system for the actual data — not the most complicated system
 on paper.**
+
+---
+
+## 21. Current project state (2026-09-27)
+
+This section is dated and goes stale. When it conflicts with `experiments/registry.csv`
+or `src/`, those win — update this section, do not argue with the evidence.
+
+### Retrieval baseline: E011 (MEASURED)
+
+7-strategy union over the full 10,320,219-record train S2+S3 pool; 200,000 train S1
+queries, seed 17; 692,176 true pairs over 188,754 entities; runtime 1719.7 s on
+`ml.r5.xlarge`; peak RSS 5.81 GiB in the artifact vs 6.84 GiB observed in a run log
+(discrepancy recorded in the E011 registry row, not reconciled).
+
+- Union pair recall **0.7766**, union entity hit rate **0.9525**, 154,640 pairs missed.
+- Standalone strategy recalls (quote these, not the old cumulative column):
+  exact_name 0.4874, alnum_name 0.4921, sorted_name 0.5220, address_exact 0.1170,
+  name_token 0.1121, address_token 0.4061, numeric_token 0.0855.
+- Cap sweep (pair/entity): 100→0.7262/0.9294, 200→0.7570/0.9427, 400→0.7670/0.9488,
+  uncapped→0.7766/0.9525; median 41 candidates/query at every cap. No cap selected.
+- $F_{0.5} = 1.25R/(0.25+R)$: at perfect precision this recall supports at most 0.9456;
+  reaching 0.95 needs pair recall ≥ 0.7917. **Retrieval is the binding constraint.**
+
+### Miss analysis: E012 (PRELIMINARY — 500-query diagnostic only)
+
+Ran at `--query-rows 500 --seed 17`, NOT 200,000. 1,740 true pairs: 1,320 retrieved,
+420 missed. Partition of the 420: 386 all-fields-present-nothing-identical (91.9%
+**of the 420 in-sample**), 34 missing-address (8.1%), 0 unclassified.
+
+**Never describe 91.9% as a share of E011's 154,640 misses or of any population.**
+
+### Not started
+
+Feature finalisation, hard-negative dataset, matcher training, calibration/decision
+tuning, end-to-end entity macro $F_{0.5}$, final test inference. E013 (df-ceiling
+diagnosis) measured locally, deferred by explicit decision — not a result.
+
+### Evidence corrections applied (2026-09-27, uncommitted)
+
+E010/E011 artifacts: old `pair_recall`/`entity_recall` columns held *cumulative* union
+recall (renamed; standalone re-derived exactly from stored `hits`); old
+`retrieved_by_exactly_one` counted pairs using 1–6 strategies; E011 briefly published
+a fractional `retrieved_by_all_strategies` of 651.88 derived from the rounded recall —
+correct value is **644** by integer identity. E012 artifact: recorded actual
+`query_rows=500`; failure modes restructured as a disjoint partition; hard examples
+carry real vendor text. Shared stats module `src/team_diamond/retrieval/recall_stats.py`
+plus 50 regression tests prevent recurrence. Full record: E010/E011/E012 registry rows.
+
+### Open unresolved conflicts (do not silently reconcile)
+
+- `configs/model.yaml` + this file default to LightGBM (PROPOSAL); a CatBoost mandate
+  has been claimed but never committed — LightGBM stands until the team decides.
+- `requirements.txt` duplicates `uv.lock` (prohibited by §4, still present).
+- France recall is unmeasurable locally (test-only jurisdiction, E004).

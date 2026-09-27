@@ -11,7 +11,7 @@ Why a union of strategies
 -------------------------
 No single blocking key is sufficient, and this is measured rather than assumed.
 On 200k sampled S1 entities against the full 10.3M-record vendor pool
-(experiment E010, seed 17):
+(experiment E011, seed 17; standalone pair recalls):
 
     exact_name        pair recall 0.4874
     alnum_name        pair recall 0.4921

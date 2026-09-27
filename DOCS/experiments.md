@@ -108,6 +108,23 @@ memory
 notes
 ```
 
+Columns added when E010–E012 were recorded, because the fourteen above could
+not carry what those rows needed to say (objective, sample, configuration,
+artifacts, evidence status, interpretation, limitations). Rows E000–E008 leave
+the new columns blank — blank means "not recorded", the same convention as
+"not measured".
+
+```text
+objective        # the question the experiment answers
+baseline         # what the change is measured against
+configuration    # plan, ceilings, caps — the exact settings
+sample           # queries, vendor pool, true pairs; the scope any rate is valid over
+artifacts        # paths to the evidence (usually gitignored, by design)
+evidence_status  # VERIFIED / MEASURED / PRELIMINARY / HYPOTHESIS / PROPOSAL
+interpretation   # what the numbers license you to claim
+limitations      # what they do not license you to claim
+```
+
 ---
 
 ---
