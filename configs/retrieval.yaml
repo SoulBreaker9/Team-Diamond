@@ -1,20 +1,42 @@
 # Candidate retrieval — Team Diamond
 #
-# STATUS: every cap below is a PROPOSAL. No retrieval experiment has been run.
-# The blocking-recall figures quoted in DOCS (76.2 / 85.4) have NO implementation
-# behind them — see suggestion.md §4 warning box. Measure before believing.
+# STATUS: FROZEN at V4 (E014-V4-200K, MEASURED 2026-09-27; E014-probe2000 for
+# caps). The old "no experiment has been run" note below is retained for the
+# DOCS figures only. Ceilings live in code (FROZEN_V4_PLAN, the single source
+# of truth) and are repeated here as comments -- if they ever disagree, the
+# code wins and this file is stale.
 #
 # AGENTS.md §Candidate Caps: caps are experimental parameters, never constants.
 
 retrieval:
+  # The seven V4 strategies, in plan order. Every name must exist in
+  # FROZEN_V4_PLAN; an unknown name fails loudly in generate_retrieval_plan.
+  # (A stale entry here -- e.g. the old name_char_ngram flag -- once made the
+  # training CLI un-runnable. There is a test pinning this list.)
   strategies:
     exact_name: true
-    name_token: true
-    name_char_ngram: true
-    address_token: true
-    address_char_ngram: false     # not yet implemented
-    phonetic: false               # not yet implemented
-    embeddings: false             # COMPLIANCE GATED — see suggestion.md §11.4
+    alnum_name: true
+    sorted_name: true
+    address_exact: true
+    name_token: true        # ceiling 200 (was 50 at E011)
+    address_token: true     # ceiling 1000 (was 200 at E011)
+    numeric_token: true     # ceiling 1000 (was 200 at E011)
+
+  # NOTE: only the seven names above may appear here. char-ngram, phonetic,
+  # and embeddings strategies are not implemented; adding such a flag crashes
+  # plan resolution loudly (by design). Embeddings remain COMPLIANCE GATED
+  # (E016 BLOCKED) regardless of this file.
+
+  # Per-query candidate cap used for training-dataset generation.  # SELECTED (was PROPOSAL): cap 400. Measured E014-probe2000 on frozen V4:
+  # pair recall 0.8552 (-3.4pp vs uncapped 0.8947) vs 0.8227 (-7.2pp) at cap
+  # 200; entity 0.9755 vs 0.9670. Changing this value re-opens the cap
+  # decision -- do not edit it as a tweak.
+  cap_per_query: 400
+
+  # Acknowledges the measured cap above. generate_candidates refuses a cap
+  # without this flag; setting it here records that cap 400 was swept and its
+  # dropped-pair cost reported (E014-probe2000), not assumed.
+  allow_unmeasured_cap: true
 
   # Cap per strategy, per S1 entity. null => not selected by experiment yet.
   # Rationale for proposing 400/250 is in suggestion.md §4.1b; it is a starting

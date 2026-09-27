@@ -456,3 +456,86 @@ def test_probe_path_runs_end_to_end_on_synthetic_data(tmp_path, monkeypatch):
 
     train = pl.read_parquet(out / "train_pairs.parquet")
     assert set(train["is_match"].unique().to_list()) == {True, False}
+
+
+# --------------------------------------------------------------------------
+# Deterministic cap truncation (E017 probe rerun differed by 36 pairs)
+# --------------------------------------------------------------------------
+
+
+def _tied_corpus(*, reverse: bool = False):
+    """One query, six vendors, identical strategy sets per pair.
+
+    Every pair is found by exactly the same strategies, so all six tie on
+    n_keys. At cap 3 the survivor set is pure tiebreak -- the case that used
+    to depend on hash/thread order.
+    """
+    vids = [f"v{i:02d}" for i in range(6)]
+    if reverse:
+        vids = vids[::-1]
+    s1 = pl.DataFrame(
+        {
+            "entity_id": ["q1"],
+            "name_norm": ["acme"],
+            "addr_norm": ["main st"],
+            "country": ["IN"],
+        }
+    )
+    vendors = pl.DataFrame(
+        {
+            "entity_id": vids,
+            "name_norm": ["acme"] * 6,
+            "addr_norm": [f"{i} main st" for i in range(6)][::-1 if reverse else 1],
+            "country": ["IN"] * 6,
+        }
+    )
+    return s1, vendors
+
+
+def test_cap_boundary_ties_break_by_smallest_vendor_id():
+    """Cap truncation must be a pure function of the inputs.
+
+    With all six pairs tied on n_keys at cap 3, the survivors must be the
+    three smallest vendor ids -- regardless of input row order. Before the
+    fix, `rank("ordinal")` numbered ties in group_by hash order, and two runs
+    of the same probe command differed by dozens of pairs.
+    """
+    from team_diamond.retrieval.candidates import generate_candidates
+
+    for reverse in (False, True):
+        s1, vendors = _tied_corpus(reverse=reverse)
+        cands, _ = generate_candidates(
+            s1, vendors, cap_per_query=3, allow_unmeasured_cap=True,
+            query_id_column="entity_id", vendor_id_column="entity_id",
+        )
+        assert sorted(cands["vendor_id"].to_list()) == ["v00", "v01", "v02"]
+        assert sorted(cands["strategy_rank"].to_list()) == [1, 2, 3]
+
+
+# --------------------------------------------------------------------------
+# retrieval.yaml must describe the frozen plan (training CLI reads it)
+# --------------------------------------------------------------------------
+
+
+def test_retrieval_yaml_matches_frozen_v4():
+    """The training CLI resolves its plan from configs/retrieval.yaml.
+
+    A stale entry here (the old file enabled a nonexistent char-ngram
+    strategy and selected no cap) made the training path un-runnable. This
+    pins the file to the frozen plan through the REAL resolution function.
+    """
+    import yaml
+
+    cfg = yaml.safe_load(Path("configs/retrieval.yaml").read_text())["retrieval"]
+    assert set(cfg["strategies"]) == {p.name for p in FROZEN_V4_PLAN}
+    assert cfg["cap_per_query"] == 400
+
+    from team_diamond.config import Config
+    from team_diamond.pipeline.run import generate_retrieval_plan
+
+    plan = generate_retrieval_plan(Config(data={"retrieval": cfg}, sources=()))
+    assert {p.name: p.max_df for p in plan} == {
+        "exact_name": None, "alnum_name": None, "sorted_name": None,
+        "address_exact": None, "name_token": 200, "address_token": 1000,
+        "numeric_token": 1000,
+    }

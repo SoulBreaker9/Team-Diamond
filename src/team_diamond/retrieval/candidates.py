@@ -325,12 +325,27 @@ def generate_candidates(
         # the key frequency through the group-by; a pair found by more
         # independent strategies is kept in preference to one found by a single
         # common token.
-        ranked = candidates.with_columns(
-            pl.col("n_keys")
-            .rank("ordinal", descending=True)
-            .over("s1_id")
-            .cast(pl.Int32)
-            .alias("strategy_rank")
+        #
+        # Deterministic tiebreak (do not remove). `rank("ordinal")` numbers
+        # ties in row order, and row order out of the group_by above is
+        # hash/thread-dependent. Two runs of the same command once produced
+        # candidate sets differing by dozens of pairs, all at cap-boundary
+        # ties. Sorting by (s1_id, n_keys desc, vendor_id asc) first makes the
+        # surviving set a pure function of the inputs: (s1_id, vendor_id) is
+        # unique per row, so the order is total. vendor_id is opaque -- using
+        # it as a tiebreak is arbitrary but stable, and stability is what
+        # training reproducibility needs.
+        ranked = (
+            candidates.sort(
+                ["s1_id", "n_keys", "vendor_id"],
+                descending=[False, True, False],
+            ).with_columns(
+                pl.col("n_keys")
+                .rank("ordinal", descending=True)
+                .over("s1_id")
+                .cast(pl.Int32)
+                .alias("strategy_rank")
+            )
         )
         kept = ranked.filter(pl.col("strategy_rank") <= cap_per_query)
         truncated = {
