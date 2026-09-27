@@ -260,6 +260,64 @@ def recall_by_country(
         }
     return out
 
+def summarize_cap_candidates(candidates, gen_report, n_queries: int) -> dict:
+    """Distribution summary of one capped candidate set. Pure function.
+
+    Args:
+        candidates: Candidate pairs with an ``s1_id`` column. Only queries
+            with at least one candidate appear; zero-candidate queries are
+            derived from ``n_queries``.
+        gen_report: The :class:`CandidateReport` from generation.
+        n_queries: Queries generation ran over (defines the zero bucket).
+
+    Returns:
+        JSON-serialisable summary. Quantiles are over queries WITH candidates
+        (the historical convention — E011 medians read this way); ``mean`` is
+        over ALL queries including zeros. Both populations are stated so the
+        two figures cannot be confused.
+    """
+    per_query = candidates.group_by("s1_id").len()["len"]
+    n_nonzero = per_query.len()
+    return {
+        "candidates": candidates.height,
+        "queries": n_queries,
+        "queries_with_candidates": n_nonzero,
+        "queries_zero_candidates": n_queries - n_nonzero,
+        "candidates_per_query_mean_all": round(candidates.height / n_queries, 3),
+        "candidates_per_query_median_nonzero": int(per_query.median()),
+        "candidates_per_query_p95_nonzero": int(per_query.quantile(0.95)),
+        "candidates_per_query_p99_nonzero": int(per_query.quantile(0.99)),
+        "candidates_per_query_max": int(per_query.max()),
+        "dropped_by_cap": gen_report.n_dropped_by_cap,
+        "pairs_before_cap": gen_report.n_pairs_before_cap,
+        "candidate_bytes": candidates.estimated_size(),
+        "per_strategy_pairs": dict(gen_report.per_strategy_pairs),
+    }
+
+
+def parse_caps(value: str | None) -> list[int]:
+    """Parse `--caps 200,400` into a cap list. Pure function.
+
+    ``None`` (flag absent) returns the full sweep grid unchanged, so existing
+    invocations behave exactly as before. An explicitly passed empty string
+    raises: it means the user typed something that selects nothing, which must
+    never silently run the full grid. Values must be positive integers;
+    anything else raises instead of silently running a different sweep.
+    """
+    if value is None:
+        return list(CAP_SWEEP)
+    caps = []
+    for part in value.split(","):
+        part = part.strip()
+        if not part.isdigit() or int(part) <= 0:
+            raise ValueError(
+                f"Bad --caps {value!r}: expected comma-separated positive "
+                f"integers, e.g. --caps 200,400"
+            )
+        caps.append(int(part))
+    return caps
+
+
 def _plan_objects(plan: list | None = None) -> list:
     """Get a plan as RetrievalPlan objects for generate_candidates.
 
@@ -484,6 +542,15 @@ def main() -> None:
              "address_token and numeric_token accept overrides. With no "
              "--ceiling flags the run is the E011 baseline exactly.",
     )
+    parser.add_argument(
+        "--caps",
+        type=str,
+        default=None,
+        metavar="C1,C2",
+        help="Restrict the cap sweep to these per-query caps, e.g. "
+             "--caps 200,400. Absent means the full grid. Selects values "
+             "only; it never changes what a cap means.",
+    )
     args = parser.parse_args()
 
     # The effective plan is fixed once, up front, and every downstream consumer
@@ -694,7 +761,11 @@ def main() -> None:
 
         plan_objs = _plan_objects(plan)
 
-        for cap in CAP_SWEEP:
+        sweep_caps = parse_caps(args.caps)
+        if sweep_caps != list(CAP_SWEEP):
+            log(f"Cap sweep restricted to {sweep_caps} (full grid is {list(CAP_SWEEP)})")
+
+        for cap in sweep_caps:
             log(f"  Cap sweep ({cap_sweep_label}): cap_per_query={cap}")
             candidates, gen_report = generate_candidates(
                 queries_for_gen,
@@ -720,28 +791,31 @@ def main() -> None:
             per_query = candidates.group_by("s1_id").len()["len"]
             log(f"    cap={cap:>4}  pair_recall={pair_r:.4f}  "
                 f"entity_recall={entity_r:.4f}  candidates={candidates.height:,}")
+            summary = summarize_cap_candidates(
+                candidates, gen_report, queries.height
+            )
             cap_results.append({
                 "cap": cap,
                 "pair_recall": round(pair_r, 6),
                 "entity_recall": round(entity_r, 6),
-                "candidates": candidates.height,
-                "candidates_per_query_median": int(per_query.median()),
-                "candidates_per_query_p95": int(per_query.quantile(0.95)),
-                "candidates_per_query_max": int(per_query.max()),
-                "dropped_by_cap": gen_report.n_dropped_by_cap,
+                **summary,
             })
             del candidates, hits, per_query
             gc.collect()
 
         # Print cap sweep summary
         print(f"\nCAP SWEEP RESULTS ({cap_sweep_label} - uncapped reference ceiling above)")
-        print(f"{'cap':>6} {'pair recall':>12} {'entity recall':>14} {'candidates':>12} {'median/q':>10} {'p95/q':>10} {'max/q':>8} {'dropped':>10}")
-        print("-" * 90)
+        print(f"{'cap':>6} {'pair recall':>12} {'entity recall':>14} {'candidates':>12} {'mean/q':>8} {'median/q':>10} {'p95/q':>10} {'p99/q':>10} {'max/q':>8} {'zero-q':>8} {'dropped':>10}")
+        print("-" * 120)
         for cr in cap_results:
             print(
                 f"{cr['cap']:>6} {cr['pair_recall']:>11.4f}  {cr['entity_recall']:>13.4f}  "
-                f"{cr['candidates']:>12,}  {cr['candidates_per_query_median']:>10,}  "
-                f"{cr['candidates_per_query_p95']:>10,}  {cr['candidates_per_query_max']:>8,}  "
+                f"{cr['candidates']:>12,}  {cr['candidates_per_query_mean_all']:>8.1f}  "
+                f"{cr['candidates_per_query_median_nonzero']:>10,}  "
+                f"{cr['candidates_per_query_p95_nonzero']:>10,}  "
+                f"{cr['candidates_per_query_p99_nonzero']:>10,}  "
+                f"{cr['candidates_per_query_max']:>8,}  "
+                f"{cr['queries_zero_candidates']:>8,}  "
                 f"{cr['dropped_by_cap']:>10,}"
             )
 

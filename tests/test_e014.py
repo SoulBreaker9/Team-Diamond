@@ -289,3 +289,59 @@ def test_e014_config_declares_five_variants_with_a_fixed_sample():
     assert cfg["baseline_ceilings"] == {"name_token": 50, "address_token": 200,
                                         "numeric_token": 200}
     assert cfg["baseline_ceilings"] == BASELINE_CEILINGS
+
+
+# --------------------------------------------------------------------------
+# Cap-report helpers: the scale probe must record distribution, not just totals
+# --------------------------------------------------------------------------
+
+
+def _cap_candidates():
+    """Synthetic candidate frame: q1x3, q2x1, q3x0 of 3 queries."""
+    return pl.DataFrame(
+        {"s1_id": ["q1", "q1", "q1", "q2"], "vendor_id": ["v1", "v2", "v3", "v1"]}
+    )
+
+
+class _FakeReport:
+    n_dropped_by_cap = 2
+    n_pairs_before_cap = 6
+    per_strategy_pairs = {"name_token": 4, "address_token": 2}
+
+
+def test_parse_caps_absent_means_full_grid():
+    assert mur.parse_caps(None) == list(mur.CAP_SWEEP)
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "abc", "200,x", "", " "])
+def test_parse_caps_rejects_non_positive_integers(bad):
+    with pytest.raises(ValueError):
+        mur.parse_caps(bad)
+
+
+def test_parse_caps_selects_subset():
+    assert mur.parse_caps("200,400") == [200, 400]
+    assert mur.parse_caps(" 400 ") == [400]
+
+
+def test_summarize_cap_candidates_counts_zeros_and_bytes():
+    out = mur.summarize_cap_candidates(_cap_candidates(), _FakeReport(), 3)
+    assert out["candidates"] == 4
+    assert out["queries"] == 3
+    assert out["queries_with_candidates"] == 2
+    assert out["queries_zero_candidates"] == 1
+    assert out["candidates_per_query_mean_all"] == pytest.approx(4 / 3, abs=1e-3)
+    assert out["candidates_per_query_median_nonzero"] == 2
+    assert out["candidates_per_query_max"] == 3
+    assert out["candidates_per_query_p99_nonzero"] >= out["candidates_per_query_p95_nonzero"]
+    assert out["dropped_by_cap"] == 2
+    assert out["pairs_before_cap"] == 6
+    assert out["candidate_bytes"] > 0
+    assert out["per_strategy_pairs"] == {"name_token": 4, "address_token": 2}
+
+
+def test_summarize_cap_candidates_json_serialisable():
+    import json
+
+    out = mur.summarize_cap_candidates(_cap_candidates(), _FakeReport(), 3)
+    json.dumps(out)
