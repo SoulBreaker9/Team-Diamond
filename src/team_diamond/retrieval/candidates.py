@@ -66,6 +66,7 @@ __all__ = [
     "CandidateReport",
     "RetrievalPlan",
     "DEFAULT_PLAN",
+    "FROZEN_V4_PLAN",
     "generate_candidates",
 ]
 
@@ -97,6 +98,29 @@ DEFAULT_PLAN: Final[tuple[RetrievalPlan, ...]] = (
     RetrievalPlan("name_token", build_name_token_keys, max_df=50),
     RetrievalPlan("address_token", build_address_token_keys, max_df=200),
     RetrievalPlan("numeric_token", build_numeric_keys, max_df=200),
+)
+
+
+#: The frozen V4 retrieval configuration (E014-V4-200K, MEASURED). This is the
+#: ONLY plan training may consume: E014 confirmed union pair recall 0.889545 /
+#: entity hit-rate 0.979068 at exactly these ceilings, and AGENTS.md freezes
+#: them. ``DEFAULT_PLAN`` above is retained unchanged as the E011 baseline
+#: record -- it must not be mistaken for the training plan.
+#:
+#: DEFECT NOTE, RESOLVED 2026-09-27: ``pipeline.run.generate_retrieval_plan``
+#: previously read from ``DEFAULT_PLAN`` here, which would have silently
+#: regenerated training candidates under E011 ceilings. It now reads from
+#: ``FROZEN_V4_PLAN`` (switched with explicit human approval; the only caller
+#: is the never-executed train/predict CLI path). If this source ever changes
+#: again, ``test_preparation_path_resolves_frozen_v4`` must be updated first.
+FROZEN_V4_PLAN: Final[tuple[RetrievalPlan, ...]] = (
+    RetrievalPlan("exact_name", build_exact_name_keys),
+    RetrievalPlan("alnum_name", build_alnum_name_keys),
+    RetrievalPlan("sorted_name", build_sorted_name_keys),
+    RetrievalPlan("address_exact", build_address_exact_keys),
+    RetrievalPlan("name_token", build_name_token_keys, max_df=200),
+    RetrievalPlan("address_token", build_address_token_keys, max_df=1000),
+    RetrievalPlan("numeric_token", build_numeric_keys, max_df=1000),
 )
 
 

@@ -1,34 +1,48 @@
 # Pairwise match model — Team Diamond
 #
-# STATUS: PROPOSAL. LightGBM is the documented default (AGENTS.md §Model
-# Preference); it is the right first model because engineered features are
-# expected to carry the signal. No model has been trained yet.
+# STATUS: PROPOSAL, resolved 2026-09-27. The trainable path in src/ is
+# CatBoost-only (team_diamond.models.catboost_matcher; no LightGBM trainer
+# exists). The previous `type: lightgbm` never dispatched anything — nothing
+# reads model.type — so this record now matches the implementable
+# configuration instead of implying a choice that cannot be executed. AGENTS.md
+# §11's LightGBM-first guidance and the AGENTS.md §21 conflict note still apply
+# as team policy; switching the configured family again needs a team call.
+# No model has been trained yet. Every null below is an unmeasured
+# hyperparameter: tune by experiment, not by habit.
 
 model:
-  type: lightgbm
+  type: catboost
   params:
-    objective: binary
-    n_estimators: null            # unmeasured; tune by experiment, not by habit
-    learning_rate: null
-    num_leaves: null
-    min_data_in_leaf: null
-    feature_fraction: null
-    bagging_fraction: null
-    bagging_freq: null
-    lambda_l1: null
-    lambda_l2: null
-    random_state: 20260926
-    n_jobs: null                  # set from the real core count, not assumed
+    loss_function: Logloss
+    eval_metric: Logloss
+    iterations: null              # code default 2000 doubles as early-stopping ceiling
+    learning_rate: null           # code default 0.08
+    depth: null                   # code default 8
+    l2_leaf_reg: null             # code default 3.0
+    random_strength: null         # code default 1.0
+    bootstrap_type: Bayesian
+    bagging_temperature: null     # code default 1.0
+    rsm: null                     # code default 0.8
+    random_seed: 20260926
+    task_type: CPU                # pinned: target instances are CPU-only; GPU is refused by code
+    thread_count: null            # set from the real core count, not assumed
+    early_stopping_rounds: null   # code default 200; requires an eval matrix
+    class_weights: null           # default None: move the operating point in the decision layer, not here
+    allow_writing_files: false    # pinned: keep catboost_info/ out of the repo
+    verbose: false
 
   calibration:
-    # Raw LightGBM probabilities are not usable as confidence. Isotonic on a
-    # held-out fold. See DOCS/eda.md §5.
+    # Raw CatBoost output is a ranking score, not a probability. Isotonic on a
+    # held-out fold AFTER fitting; never on the training fold. See
+    # CatBoostMatcher.fit_calibrator. Whether calibration is applied at all is
+    # a PROPOSAL until an experiment shows it moves entity-level F0.5.
     method: isotonic
     fit_on: validation_fold
 
   hard_negatives:
-    # Negatives are drawn from the SAME retrieval system used at inference.
-    # Random negatives teach the model almost nothing (AGENTS.md §Hard Negatives).
+    # Negatives are drawn from the SAME retrieval system used at inference
+    # (FROZEN_V4_PLAN). Random negatives teach the model almost nothing
+    # (AGENTS.md §Hard Negatives). Mined strictly inside the training fold.
     source: retrieval_candidates
-    negatives_per_positive: null   # unmeasured
+    negatives_per_positive: null   # unmeasured; code default 3 applies if unset
     seed: 20260926

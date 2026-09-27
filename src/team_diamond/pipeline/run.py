@@ -189,18 +189,24 @@ def prepare_vendor_pool(
 def generate_retrieval_plan(config: Config) -> tuple[RetrievalPlan, ...]:
     """Read the enabled retrieval strategies from config.
 
+    The source of truth is :data:`FROZEN_V4_PLAN` (E014-V4-200K, MEASURED,
+    AGENTS.md-frozen) — never the E011-baseline ``DEFAULT_PLAN``. A training
+    or prediction run through this path must regenerate exactly the candidates
+    the frozen measurements describe; falling back to E011 ceilings would
+    silently invalidate every V4 number.
+
     Args:
         config: Merged configuration.
 
     Returns:
         The enabled plans, in the config's order.
     """
-    from team_diamond.retrieval.candidates import DEFAULT_PLAN
+    from team_diamond.retrieval.candidates import FROZEN_V4_PLAN
 
-    by_name = {plan.name: plan for plan in DEFAULT_PLAN}
+    by_name = {plan.name: plan for plan in FROZEN_V4_PLAN}
     requested = config.get("retrieval.strategies")
     if not requested:
-        return DEFAULT_PLAN
+        return FROZEN_V4_PLAN
     plans: list[RetrievalPlan] = []
     for name in requested:
         if name not in by_name:
