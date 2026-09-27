@@ -73,3 +73,37 @@ e014:
     - model training
     - new retrieval strategies (no n-grams, embeddings, transliteration, fuzzy)
     - changing the four exact strategies or normalization
+
+# SCREEN ADVANCEMENT RULE (pre-declared 2026-09-27, BEFORE results exist).
+# A variant advances to the 200K confirmation iff ALL of R1-R4 hold on the
+# paired 20K sample (same queries for every variant, so the comparison is
+# paired and sampling noise cancels directionally):
+#
+# R1 materiality: net recovered pairs vs V0 >= 0.1% of sample true pairs
+#    (~70 pairs at 20K scale). Below this the gain is noise against the
+#    0.7917 target regardless of efficiency.
+# R2 no entity regression: entity hit-rate delta vs V0 >= 0.
+# R3 country consistency: pair-recall delta >= 0 in EACH of IN and US
+#    (FR is absent from train; reported, never imputed). A gain confined to
+#    one country is a narrow effect, not a ceiling effect.
+# R4 source consistency: pair-recall delta >= 0 for EACH of S2 and S3
+#    true pairs (from the per-variant miss-analysis rerun).
+# R5 efficiency tiebreak (only among variants passing R1-R4): rank by
+#    recovered-pairs per additional candidate-pair volume; a variant with
+#    10x worse efficiency advances only if its absolute gain is 3x larger.
+# R6 narrowness flag (informative, not a gate): if >50% of a variant's
+#    recovered pairs come from a single key block, record it; the 200K
+#    confirmation is then scoped to check breadth, not just size.
+#
+# Outcomes: none pass R1-R4 -> STOP E014, ceiling hypothesis unsupported.
+# One passes -> confirm ONLY it at 200K. Several pass -> advance the smallest
+# number that resolves the uncertainty (efficiency first). V0 is NOT rerun at
+# 200K: E011 is the full-corpus baseline unless apples-to-apples demands it.
+advancement_rule:
+  materiality_floor_pairs_pct: 0.1
+  entity_hitrate_delta_min: 0.0
+  country_deltas_min: 0.0
+  source_deltas_min: 0.0
+  efficiency_tiebreak_ratio: 10.0
+  efficiency_absolute_override: 3.0
+  narrowness_single_block_pct: 50.0
