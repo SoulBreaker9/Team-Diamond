@@ -144,6 +144,18 @@ FEATURE_COLUMNS: Final[tuple[str, ...]] = (
 CATEGORICAL_COLUMNS: Final[tuple[str, ...]] = ("country_pair",)
 
 
+#: The full model-input column order: every numeric feature followed by every
+#: categorical one. ``to_model_matrix`` requires categorical columns to appear
+#: in ``feature_names`` (it raises rather than silently dropping them), so all
+#: call sites must use this tuple -- never ``FEATURE_COLUMNS`` alone with a
+#: separate ``categorical_columns`` argument. That combination always crashes,
+#: which is how the preparation probe found it.
+MODEL_FEATURE_NAMES: Final[tuple[str, ...]] = (
+    *FEATURE_COLUMNS,
+    *CATEGORICAL_COLUMNS,
+)
+
+
 def numeric_signature(addr: pl.Expr) -> pl.Expr:
     """Reduce an address to its sorted, de-duplicated digit runs.
 

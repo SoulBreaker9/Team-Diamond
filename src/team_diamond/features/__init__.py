@@ -29,6 +29,7 @@ from team_diamond.features.idf import (
 from team_diamond.features.pairs import (
     CATEGORICAL_COLUMNS,
     FEATURE_COLUMNS,
+    MODEL_FEATURE_NAMES,
     PAIR_KEY_COLUMNS,
     build_pair_features,
     numeric_signature,
@@ -45,6 +46,7 @@ __all__ = [
     "CATEGORICAL_COLUMNS",
     "FEATURE_COLUMNS",
     "FUZZY_SCORERS",
+    "MODEL_FEATURE_NAMES",
     "PAIR_KEY_COLUMNS",
     "UNSEEN_IDF",
     "IdfTable",

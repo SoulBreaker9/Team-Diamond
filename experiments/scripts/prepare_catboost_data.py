@@ -63,7 +63,10 @@ import polars as pl
 
 from team_diamond.data import DatasetPaths, load_split
 from team_diamond.features.idf import build_token_rarity
-from team_diamond.features.pairs import FEATURE_COLUMNS, build_pair_features
+from team_diamond.features.pairs import (
+    MODEL_FEATURE_NAMES,
+    build_pair_features,
+)
 from team_diamond.models.matrix import to_model_matrix
 from team_diamond.preprocessing.normalize_fast import normalize_columns
 from team_diamond.retrieval.candidates import FROZEN_V4_PLAN, generate_candidates
@@ -192,9 +195,11 @@ def main(argv=None) -> int:
     )
     log(f"candidates {candidates.height:,} "
         f"dropped_by_cap={gen_report.n_dropped_by_cap:,}")
-    del vendors
-    gc.collect()
-
+    # NOTE: `vendors` must stay alive past candidate generation: the rarity
+    # tables AND the feature build below both read the normalized vendor pool.
+    # An earlier revision deleted it here to save memory and crashed at the
+    # rarity step with UnboundLocalError on the first real run. The pool is
+    # deleted once, after features, at the end of main.
     labelled_train = label_candidates(
         esplit.train.contains_frame(candidates), split["ground_truth"],
         fold="train",
@@ -247,7 +252,7 @@ def main(argv=None) -> int:
     train_matrix = to_model_matrix(
         train_feat.join(sample.frame.select("s1_id", "vendor_id", "is_match"),
                         on=["s1_id", "vendor_id"], how="left"),
-        feature_names=list(FEATURE_COLUMNS), target_column="is_match",
+        feature_names=list(MODEL_FEATURE_NAMES), target_column="is_match",
         categorical_columns=("country_pair",),
     )
     log(f"train matrix {train_matrix.X.shape}, "

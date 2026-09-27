@@ -11,6 +11,8 @@ about order, and the frozen V4 plan cannot drift from the measured ceilings.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import polars as pl
 import pytest
 
@@ -311,3 +313,146 @@ def test_preparation_path_resolves_frozen_v4():
         generate_retrieval_plan(
             Config(data={"retrieval": {"strategies": ["nope"]}}, sources=())
         )
+
+
+# --------------------------------------------------------------------------
+# Preparation-script probe path (E017 SageMaker UnboundLocalError)
+# --------------------------------------------------------------------------
+
+_PREP_PATH = Path("experiments/scripts/prepare_catboost_data.py")
+
+
+def _load_prep():
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "prepare_catboost_data", _PREP_PATH
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _synthetic_split():
+    """Twelve S1 entities, twenty vendors, strict partial matching.
+
+    s1_00..s1_09 have one true vendor each with shared name tokens (so the
+    real generator retrieves them); s1_10/s1_11 are singletons. Vendor ids
+    are unique across entities, which the split verifier requires.
+    """
+    s1_rows, v2_rows, v3_rows, gt_rows = [], [], [], []
+    for i in range(12):
+        sid = f"s1_{i:02d}"
+        s1_rows.append(
+            (sid, f"Acme Trading {i}", f"{100 + i} Market Street",
+             "IN" if i % 2 else "US")
+        )
+        if i < 10:
+            vid = f"v2_{i:02d}"
+            v2_rows.append(
+                (vid, f"Acme Trading {i} Ltd", f"{100 + i} Market St",
+                 "IN" if i % 2 else "US")
+            )
+            gt_rows.append((sid, vid))
+        else:
+            gt_rows.append((sid, ""))
+    for j in range(10):
+        v3_rows.append(
+            (f"v3_{j:02d}", f"Unrelated Business {j}", f"{900 + j} Other Road",
+             "US")
+        )
+    s1 = pl.DataFrame(
+        {
+            "entity_id": [r[0] for r in s1_rows],
+            "business_name": [r[1] for r in s1_rows],
+            "business_address": [r[2] for r in s1_rows],
+            "country": [r[3] for r in s1_rows],
+        }
+    )
+
+    def vendors(rows, source):
+        return pl.DataFrame(
+            {
+                "entity_id": [r[0] for r in rows],
+                "business_name": [r[1] for r in rows],
+                "business_address": [r[2] for r in rows],
+                "country": [r[3] for r in rows],
+                "source": [source] * len(rows),
+            }
+        )
+
+    gt = pl.DataFrame(
+        {
+            "source1_entity_id": [r[0] for r in gt_rows],
+            "matched_entity_ids": [r[1] for r in gt_rows],
+        }
+    )
+    return {
+        "source1": s1,
+        "source2": vendors(v2_rows, 2),
+        "source3": vendors(v3_rows, 3),
+        "ground_truth": gt,
+    }
+
+
+def test_probe_path_runs_end_to_end_on_synthetic_data(tmp_path, monkeypatch):
+    """The full probe control flow, including the rarity-after-generation step.
+
+    This is the path that crashed on SageMaker with UnboundLocalError:
+    `vendors` was deleted after candidate generation but read again when
+    building rarity/features. Monkeypatched data keeps it milliseconds-small;
+    every other stage (split, generation, labelling, sampling, features,
+    matrix, manifest) runs for real.
+    """
+    prep = _load_prep()
+    data = _synthetic_split()
+
+    def fake_discover():
+        return object()
+
+    def fake_load_split(paths, split):
+        assert split == "train", "probe must never load test data"
+        return data
+
+    monkeypatch.setattr(prep, "DatasetPaths", type("D", (), {
+        "discover": staticmethod(fake_discover),
+    }))
+    monkeypatch.setattr(prep, "load_split", fake_load_split)
+
+    out = tmp_path / "probe"
+    rc = prep.main([
+        "--mode", "probe",
+        "--query-rows", "12",
+        "--seed", "17",
+        "--cap", "10",
+        "--negatives-per-positive", "2",
+        "--output-dir", str(out),
+        "--experiment-id", "E017-probe-test",
+    ])
+    assert rc == 0
+    assert (out / "train_pairs.parquet").is_file()
+    assert (out / "validation_pairs.parquet").is_file()
+    manifest_path = out / "split_manifest.json"
+    assert manifest_path.is_file()
+
+    import json
+
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["plan"] == "FROZEN_V4_PLAN"
+    assert manifest["ceilings"] == {
+        "name_token": 200, "address_token": 1000, "numeric_token": 1000,
+    }
+    assert manifest["train_pairs"] > 0
+    assert manifest["train_positives"] > 0
+    assert manifest["train_negatives"] > 0
+    # Model-input contract: 60 numeric features + country_pair categorical.
+    # FEATURE_COLUMNS alone (60) with a separate categorical argument always
+    # crashes in to_model_matrix -- the second latent defect this probe found.
+    assert manifest["matrix_shape"] == [manifest["train_pairs"], 61]
+    assert manifest["feature_names"][-1] == "country_pair"
+    assert len(manifest["feature_names"]) == 61
+
+    train = pl.read_parquet(out / "train_pairs.parquet")
+    assert set(train["is_match"].unique().to_list()) == {True, False}

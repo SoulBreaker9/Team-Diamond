@@ -61,7 +61,7 @@ from team_diamond.config import Config, load_config
 from team_diamond.data import DatasetPaths, load_split
 from team_diamond.features import (
     CATEGORICAL_COLUMNS,
-    FEATURE_COLUMNS,
+    MODEL_FEATURE_NAMES,
     build_pair_features,
     build_token_rarity,
 )
@@ -457,13 +457,13 @@ def train_and_evaluate(
     with trace.stage("to_model_matrix"):
         train_matrix = to_model_matrix(
             train_features,
-            feature_names=FEATURE_COLUMNS,
+            feature_names=MODEL_FEATURE_NAMES,
             categorical_columns=CATEGORICAL_COLUMNS,
             target_column=LABEL_COLUMN,
         )
         validation_matrix = to_model_matrix(
             validation_features,
-            feature_names=FEATURE_COLUMNS,
+            feature_names=MODEL_FEATURE_NAMES,
             categorical_columns=CATEGORICAL_COLUMNS,
             target_column=LABEL_COLUMN,
             categorical_vocabularies=train_matrix.categorical_vocabularies,
@@ -568,7 +568,7 @@ def predict_and_submit(
     with trace.stage("score_test"):
         matrix = to_model_matrix(
             features,
-            feature_names=FEATURE_COLUMNS,
+            feature_names=MODEL_FEATURE_NAMES,
             categorical_columns=CATEGORICAL_COLUMNS,
             categorical_vocabularies=matcher.categorical_vocabularies(),
         )
